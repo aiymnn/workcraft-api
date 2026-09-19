@@ -1,8 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
-import { verifyAccessToken } from "./jwt.js";
+import {
+  verifyAccessToken,
+  type StudioAccess,
+} from "./jwt.js";
 
 export interface AuthenticatedRequest extends Request {
   userId?: number;
+  studioId?: number;
+  studioAccess?: StudioAccess;
 }
 
 export function requireAuth(
@@ -32,6 +37,8 @@ export function requireAuth(
     const payload = verifyAccessToken(token);
 
     req.userId = payload.userId;
+    req.studioId = payload.studioId;
+    req.studioAccess = payload.access;
 
     next();
   } catch {
@@ -40,4 +47,27 @@ export function requireAuth(
       message: "Invalid or expired authentication token.",
     });
   }
+}
+
+/** Requires auth + a studio membership on the token. */
+export function requireStudio(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  if (!req.userId) {
+    return res.status(401).json({
+      status: "error",
+      message: "Authentication required.",
+    });
+  }
+
+  if (!req.studioId || !req.studioAccess) {
+    return res.status(403).json({
+      status: "error",
+      message: "No studio membership for this account.",
+    });
+  }
+
+  next();
 }

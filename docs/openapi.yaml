@@ -2,7 +2,9 @@ openapi: 3.0.3
 
 info:
   title: Workcraft API
-  description: API contract and documentation for Workcraft
+  description: |
+    Studio-ops API for Workcraft. Response envelope: `{ status: "success"|"error", data? | message? }`.
+    Authenticated routes expect `Authorization: Bearer <JWT>`. Domain routes require studio membership on the token.
   version: 1.0.0
 
 servers:
@@ -11,15 +13,126 @@ servers:
 
 tags:
   - name: System
-    description: System endpoints
+    description: Health checks
+  - name: Auth
+    description: Login and current session
+  - name: Users
+    description: Platform users (RBAC)
+  - name: Clients
+    description: Studio clients book
+  - name: Settings
+    description: Studio settings, option catalogs, reminders, templates
+  - name: Team
+    description: Login members and crew contacts
+  - name: Account
+    description: Self-service profile and security
+  - name: Quotations
+    description: Quotes and nested lines/sessions/payments/contracts
+  - name: Jobs
+    description: Jobs, checklist, deliverables
+  - name: Calendar
+    description: Session calendar reads
+  - name: Money
+    description: Invoices, payments, expenses, drawings, other income
+  - name: Portal
+    description: Client portal tokens and public payload
+  - name: Dashboard
+    description: Studio KPI summary
+  - name: Pricing
+    description: Opex, targets, saved calculations
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiError:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          example: error
+        message:
+          type: string
+    ApiSuccess:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: success
+        data:
+          description: Endpoint-specific payload
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        message:
+          type: string
+    DatabaseHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        database:
+          type: string
+        result:
+          type: array
+          items:
+            type: object
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    PageQuery:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSizeQuery:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    SearchQuery:
+      name: search
+      in: query
+      schema:
+        type: string
 
 paths:
   /api/health:
     get:
+      tags: [System]
       summary: Check API health
       operationId: getHealth
-      tags:
-        - System
       responses:
         "200":
           description: API is running
@@ -30,10 +143,9 @@ paths:
 
   /api/db/health:
     get:
+      tags: [System]
       summary: Check database connection
       operationId: getDatabaseHealth
-      tags:
-        - System
       responses:
         "200":
           description: Database is connected
@@ -44,39 +156,2311 @@ paths:
         "500":
           description: Database connection failed
 
-components:
-  schemas:
-    HealthResponse:
-      type: object
-      required:
-        - status
-        - message
-      properties:
-        status:
-          type: string
-          example: ok
-        message:
-          type: string
-          example: Workcraft API is running
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive JWT
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Login success — accessToken, user, studio, access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
-    DatabaseHealthResponse:
-      type: object
-      required:
-        - status
-        - database
-        - result
-      properties:
-        status:
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user, studio, and access
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List platform users
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Users list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Users]
+      summary: Create platform user
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    patch:
+      tags: [Users]
+      summary: Update platform user
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Users]
+      summary: Delete platform user
+      operationId: deleteUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/clients:
+    get:
+      tags: [Clients]
+      summary: List clients
+      operationId: listClients
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - $ref: "#/components/parameters/SearchQuery"
+        - name: includeRetired
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Paginated clients
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Clients]
+      summary: Create client
+      operationId: createClient
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                  nullable: true
+                email:
+                  type: string
+                  nullable: true
+                nricOrSsm:
+                  type: string
+                  nullable: true
+                tin:
+                  type: string
+                  nullable: true
+                socialHandle:
+                  type: string
+                  nullable: true
+                address:
+                  type: string
+                  nullable: true
+                whatsappConsent:
+                  type: boolean
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/clients/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Clients]
+      summary: Get client
+      operationId: getClient
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Client detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Clients]
+      summary: Update client
+      operationId: updateClient
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Clients]
+      summary: Soft-delete (retire) client
+      operationId: deleteClient
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Retired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/studio:
+    get:
+      tags: [Settings]
+      summary: Get studio settings
+      operationId: getStudioSettings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Studio row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Settings]
+      summary: Patch studio settings
+      operationId: patchStudioSettings
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated studio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/options:
+    get:
+      tags: [Settings]
+      summary: List option catalogs
+      operationId: listOptionCatalogs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Catalogs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/options/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
           type: string
-          example: ok
-        database:
+          enum:
+            [
+              CEREMONY_TYPE,
+              JOB_TYPE,
+              LEAD_SOURCE,
+              PAY_METHOD,
+              EXPENSE_CAT,
+              INCOME_CAT,
+              CANCEL_REASON,
+              BANK,
+              CREW_ROLE,
+              CRAFT,
+              EQUIP_LOCATION,
+            ]
+    get:
+      tags: [Settings]
+      summary: Get one option catalog
+      operationId: getOptionCatalog
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/options/{key}/seed:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
           type: string
-          example: connected
-        result:
-          type: array
-          items:
-            type: object
-            properties:
-              connected:
-                type: integer
-                example: 1
+    post:
+      tags: [Settings]
+      summary: Seed built-in option catalog
+      operationId: seedOptionCatalog
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Seeded catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/options/{key}/items:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Settings]
+      summary: Add option item
+      operationId: addOptionItem
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/options/items/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    patch:
+      tags: [Settings]
+      summary: Update or retire option item
+      operationId: updateOptionItem
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                sortOrder:
+                  type: integer
+                retire:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/reminders:
+    get:
+      tags: [Settings]
+      summary: List payment reminder rules
+      operationId: listReminders
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Rules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    put:
+      tags: [Settings]
+      summary: Replace payment reminder rules
+      operationId: putReminders
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rules]
+              properties:
+                rules:
+                  type: array
+                  items:
+                    type: object
+                    required: [days, dir, enabled]
+                    properties:
+                      days:
+                        type: integer
+                      dir:
+                        type: string
+                        enum: [before, after, on]
+                      enabled:
+                        type: boolean
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/packages:
+    get:
+      tags: [Settings]
+      summary: List packages
+      operationId: listPackages
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Settings]
+      summary: Create package
+      operationId: createPackage
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                price:
+                  oneOf:
+                    - type: number
+                    - type: string
+                description:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/packages/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Settings]
+      summary: Get package
+      operationId: getPackage
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Settings]
+      summary: Update package
+      operationId: updatePackage
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Settings]
+      summary: Delete package
+      operationId: deletePackage
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/payment-plans:
+    get:
+      tags: [Settings]
+      summary: List payment plans
+      operationId: listPaymentPlans
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Plans
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Settings]
+      summary: Create payment plan
+      operationId: createPaymentPlan
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                milestones:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/payment-plans/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Settings]
+      summary: Get payment plan
+      operationId: getPaymentPlan
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Settings]
+      summary: Update payment plan (milestones replace when sent)
+      operationId: updatePaymentPlan
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Settings]
+      summary: Delete payment plan
+      operationId: deletePaymentPlan
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/contracts:
+    get:
+      tags: [Settings]
+      summary: List contract templates
+      operationId: listContracts
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contracts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Settings]
+      summary: Create contract template
+      operationId: createContract
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, body]
+              properties:
+                name:
+                  type: string
+                body:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/contracts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Settings]
+      summary: Get contract template
+      operationId: getContract
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contract
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Settings]
+      summary: Update contract template
+      operationId: updateContract
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Settings]
+      summary: Delete contract template
+      operationId: deleteContract
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/checklists:
+    get:
+      tags: [Settings]
+      summary: List checklist templates
+      operationId: listChecklists
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Checklists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Settings]
+      summary: Create checklist template
+      operationId: createChecklist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                isDefault:
+                  type: boolean
+                items:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/checklists/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Settings]
+      summary: Get checklist template
+      operationId: getChecklist
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Settings]
+      summary: Update checklist template
+      operationId: updateChecklist
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Settings]
+      summary: Delete checklist template
+      operationId: deleteChecklist
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/checklists/{id}/duplicate:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Settings]
+      summary: Duplicate checklist template
+      operationId: duplicateChecklist
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Duplicated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/email-templates:
+    get:
+      tags: [Settings]
+      summary: List email templates
+      operationId: listEmailTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/email-templates/seed:
+    post:
+      tags: [Settings]
+      summary: Seed default email templates
+      operationId: seedEmailTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Seeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/email-templates/{type}:
+    parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [QUOTE, INVOICE, REM_BEFORE, REM_DUE, REM_AFTER]
+    put:
+      tags: [Settings]
+      summary: Upsert email template by type
+      operationId: upsertEmailTemplate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, subject, body]
+              properties:
+                title:
+                  type: string
+                subject:
+                  type: string
+                body:
+                  type: string
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/whatsapp-templates:
+    get:
+      tags: [Settings]
+      summary: List WhatsApp templates
+      operationId: listWhatsappTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/whatsapp-templates/seed:
+    post:
+      tags: [Settings]
+      summary: Seed default WhatsApp templates
+      operationId: seedWhatsappTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Seeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/settings/whatsapp-templates/{type}:
+    parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [QUOTE, INVOICE, REM_BEFORE, REM_DUE, REM_AFTER, CONTRACT]
+    put:
+      tags: [Settings]
+      summary: Upsert WhatsApp template by type
+      operationId: upsertWhatsappTemplate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body]
+              properties:
+                title:
+                  type: string
+                body:
+                  type: string
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/team/members:
+    get:
+      tags: [Team]
+      summary: List team members
+      operationId: listTeamMembers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Team]
+      summary: Create team login (ADMIN/MEMBER)
+      operationId: createTeamMember
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, access]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+                phone:
+                  type: string
+                  nullable: true
+                access:
+                  type: string
+                  enum: [ADMIN, MEMBER]
+                craftItemIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/team/members/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Team]
+      summary: Get team member
+      operationId: getTeamMember
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Team]
+      summary: Update team member
+      operationId: updateTeamMember
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Team]
+      summary: Remove team member
+      operationId: deleteTeamMember
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/team/crew:
+    get:
+      tags: [Team]
+      summary: List crew contacts
+      operationId: listCrew
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: includeRetired
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Crew
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Team]
+      summary: Create crew contact
+      operationId: createCrew
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                  nullable: true
+                email:
+                  type: string
+                  nullable: true
+                craftItemIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/team/crew/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Team]
+      summary: Get crew contact
+      operationId: getCrew
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Team]
+      summary: Update crew contact (retired restores)
+      operationId: updateCrew
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Team]
+      summary: Soft-retire crew contact
+      operationId: deleteCrew
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Retired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/account/profile:
+    get:
+      tags: [Account]
+      summary: Get own profile
+      operationId: getAccountProfile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile (user, studio, access)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Account]
+      summary: Update own profile
+      operationId: patchAccountProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                  nullable: true
+                waUpdatesOptIn:
+                  type: boolean
+                myBillsRemindersEnabled:
+                  type: boolean
+                myBillsDaysBefore:
+                  type: integer
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/account/password:
+    post:
+      tags: [Account]
+      summary: Change password
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "401":
+          description: Wrong current password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/email:
+    post:
+      tags: [Account]
+      summary: Change email (501 stub)
+      operationId: changeEmail
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "501":
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/2fa/enroll:
+    post:
+      tags: [Account]
+      summary: Enroll 2FA (501 stub)
+      operationId: enroll2fa
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/2fa/disable:
+    post:
+      tags: [Account]
+      summary: Disable 2FA (501 stub)
+      operationId: disable2fa
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/quotations:
+    get:
+      tags: [Quotations]
+      summary: List quotations
+      operationId: listQuotations
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - $ref: "#/components/parameters/SearchQuery"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, SENT, ACCEPTED, LOST]
+      responses:
+        "200":
+          description: Paginated quotations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Quotations]
+      summary: Create quotation
+      operationId: createQuotation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId]
+              properties:
+                clientId:
+                  type: integer
+                status:
+                  type: string
+                  enum: [DRAFT, SENT, ACCEPTED, LOST]
+                currency:
+                  type: string
+                intro:
+                  type: string
+                  nullable: true
+                notes:
+                  type: string
+                  nullable: true
+                lineItems:
+                  type: array
+                  items:
+                    type: object
+                sessions:
+                  type: array
+                  items:
+                    type: object
+                paymentRows:
+                  type: array
+                  items:
+                    type: object
+                contracts:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Created (number QUO-YYYY-####)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/quotations/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Quotations]
+      summary: Get quotation detail
+      operationId: getQuotation
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Nested quotation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Quotations]
+      summary: Update quotation (nested arrays replace when sent)
+      operationId: updateQuotation
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Quotations]
+      summary: Delete quotation
+      operationId: deleteQuotation
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      operationId: listJobs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - $ref: "#/components/parameters/SearchQuery"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [CONFIRMED, COMPLETED, CANCELLED]
+      responses:
+        "200":
+          description: Paginated jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Jobs]
+      summary: Create job
+      operationId: createJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId]
+              properties:
+                clientId:
+                  type: integer
+                quotationId:
+                  type: integer
+                  nullable: true
+                status:
+                  type: string
+                  enum: [CONFIRMED, COMPLETED, CANCELLED]
+                sessions:
+                  type: array
+                  items:
+                    type: object
+                checklistItems:
+                  type: array
+                  items:
+                    type: object
+                deliverables:
+                  type: array
+                  items:
+                    type: object
+                contracts:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Created (number JOB-YYYY-####)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/jobs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Jobs]
+      summary: Get job detail
+      operationId: getJob
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Nested job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Jobs]
+      summary: Update job
+      operationId: updateJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Jobs]
+      summary: Delete job
+      operationId: deleteJob
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/jobs/{id}/checklist/{itemId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: itemId
+        in: path
+        required: true
+        schema:
+          type: integer
+    patch:
+      tags: [Jobs]
+      summary: Patch checklist item
+      operationId: patchJobChecklistItem
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                done:
+                  type: boolean
+                label:
+                  type: string
+                phase:
+                  type: string
+                  enum: [BEFORE, ON_DAY, AFTER]
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/jobs/{id}/deliverables/{deliverableId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: deliverableId
+        in: path
+        required: true
+        schema:
+          type: integer
+    patch:
+      tags: [Jobs]
+      summary: Patch deliverable
+      operationId: patchJobDeliverable
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/calendar/sessions:
+    get:
+      tags: [Calendar]
+      summary: List sessions in date range
+      operationId: listCalendarSessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Sessions with job, client, crew
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/invoices:
+    get:
+      tags: [Money]
+      summary: List invoices
+      operationId: listInvoices
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, SENT, PAID, VOID]
+        - name: jobId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated invoices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Money]
+      summary: Create invoice
+      operationId: createInvoice
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jobId]
+              properties:
+                jobId:
+                  type: integer
+                milestones:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Created (INV-YYYY-####)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/invoices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Money]
+      summary: Get invoice
+      operationId: getInvoice
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Money]
+      summary: Update invoice
+      operationId: updateInvoice
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Money]
+      summary: Delete invoice
+      operationId: deleteInvoice
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/payments:
+    get:
+      tags: [Money]
+      summary: List payments
+      operationId: listPayments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PAID, UNPAID, WRITTEN_OFF]
+        - name: jobId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated payments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Money]
+      summary: Create payment
+      operationId: createPayment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  oneOf:
+                    - type: number
+                    - type: string
+                jobId:
+                  type: integer
+                  nullable: true
+                status:
+                  type: string
+                  enum: [PAID, UNPAID, WRITTEN_OFF]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/payments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Money]
+      summary: Get payment
+      operationId: getPayment
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Payment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Money]
+      summary: Update payment
+      operationId: updatePayment
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Money]
+      summary: Delete payment
+      operationId: deletePayment
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/expenses:
+    get:
+      tags: [Money]
+      summary: List expenses
+      operationId: listExpenses
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageQuery"
+        - $ref: "#/components/parameters/PageSizeQuery"
+        - name: taxBucket
+          in: query
+          schema:
+            type: string
+            enum: [CLAIMABLE, EQUIPMENT, NOT_CLAIMABLE, DRAWING]
+        - name: jobId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated expenses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Money]
+      summary: Create expense
+      operationId: createExpense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, spentAt]
+              properties:
+                amount:
+                  oneOf:
+                    - type: number
+                    - type: string
+                spentAt:
+                  type: string
+                taxBucket:
+                  type: string
+                  enum: [CLAIMABLE, EQUIPMENT, NOT_CLAIMABLE, DRAWING]
+                jobId:
+                  type: integer
+                  nullable: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/expenses/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Money]
+      summary: Get expense
+      operationId: getExpense
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Money]
+      summary: Update expense
+      operationId: updateExpense
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Money]
+      summary: Delete expense
+      operationId: deleteExpense
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/drawings:
+    get:
+      tags: [Money]
+      summary: List owner drawings
+      operationId: listDrawings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Drawings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Money]
+      summary: Create drawing
+      operationId: createDrawing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, drawnAt]
+              properties:
+                amount:
+                  oneOf:
+                    - type: number
+                    - type: string
+                drawnAt:
+                  type: string
+                notes:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/drawings/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [Money]
+      summary: Delete drawing
+      operationId: deleteDrawing
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/other-income:
+    get:
+      tags: [Money]
+      summary: List other income
+      operationId: listOtherIncome
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Other income
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Money]
+      summary: Create other income
+      operationId: createOtherIncome
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, receivedAt]
+              properties:
+                amount:
+                  oneOf:
+                    - type: number
+                    - type: string
+                receivedAt:
+                  type: string
+                countsTowardProfit:
+                  type: boolean
+                notes:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/other-income/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    delete:
+      tags: [Money]
+      summary: Delete other income
+      operationId: deleteOtherIncome
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/portal/tokens:
+    post:
+      tags: [Portal]
+      summary: Issue portal token for a job
+      operationId: issuePortalToken
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jobId]
+              properties:
+                jobId:
+                  type: integer
+                expiresAt:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        "201":
+          description: Plaintext token returned once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/portal/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Portal]
+      summary: Public portal payload (no auth)
+      operationId: getPublicPortal
+      responses:
+        "200":
+          description: Studio, job, client, sessions, deliverables, invoices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Studio dashboard KPIs and next sessions
+      operationId: getDashboard
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/pricing:
+    get:
+      tags: [Pricing]
+      summary: Pricing hub (opex, targets, saved calcs)
+      operationId: getPricingHub
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Hub payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/pricing/opex:
+    put:
+      tags: [Pricing]
+      summary: Upsert opex payload
+      operationId: putPricingOpex
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/pricing/targets:
+    put:
+      tags: [Pricing]
+      summary: Upsert pricing targets
+      operationId: putPricingTargets
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jobsPerMonth, avgPrice, profitGoal]
+              properties:
+                jobsPerMonth:
+                  type: integer
+                avgPrice:
+                  oneOf:
+                    - type: number
+                    - type: string
+                profitGoal:
+                  oneOf:
+                    - type: number
+                    - type: string
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/pricing/calcs:
+    get:
+      tags: [Pricing]
+      summary: List saved calculations
+      operationId: listPricingCalcs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Saved calcs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Pricing]
+      summary: Create saved calculation
+      operationId: createPricingCalc
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, sellPrice, directCost]
+              properties:
+                name:
+                  type: string
+                sellPrice:
+                  oneOf:
+                    - type: number
+                    - type: string
+                directCost:
+                  oneOf:
+                    - type: number
+                    - type: string
+                verdict:
+                  type: string
+                  nullable: true
+                notes:
+                  type: string
+                  nullable: true
+                packageId:
+                  type: integer
+                  nullable: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/pricing/calcs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Pricing]
+      summary: Get saved calculation
+      operationId: getPricingCalc
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Calc
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    patch:
+      tags: [Pricing]
+      summary: Update saved calculation
+      operationId: updatePricingCalc
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Pricing]
+      summary: Delete saved calculation
+      operationId: deletePricingCalc
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"

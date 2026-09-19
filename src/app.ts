@@ -10,6 +10,17 @@ import healthRoutes from "./routes/health.routes.js";
 import dbRoutes from "./routes/db.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
+import clientRoutes from "./routes/client.routes.js";
+import settingsRoutes from "./routes/settings.routes.js";
+import teamRoutes from "./routes/team.routes.js";
+import accountRoutes from "./routes/account.routes.js";
+import quotationRoutes from "./routes/quotation.routes.js";
+import jobRoutes from "./routes/job.routes.js";
+import calendarRoutes from "./routes/calendar.routes.js";
+import moneyRoutes from "./routes/money.routes.js";
+import portalRoutes from "./routes/portal.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import pricingRoutes from "./routes/pricing.routes.js";
 import { errorHandler } from "./errors/error-handler.js";
 
 const app = express();
@@ -31,6 +42,17 @@ app.use("/api", healthRoutes);
 app.use("/api/db", dbRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/clients", clientRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/team", teamRoutes);
+app.use("/api/account", accountRoutes);
+app.use("/api/quotations", quotationRoutes);
+app.use("/api/jobs", jobRoutes);
+app.use("/api/calendar", calendarRoutes);
+app.use("/api/money", moneyRoutes);
+app.use("/api/portal", portalRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/pricing", pricingRoutes);
 
 app.use(errorHandler);
 

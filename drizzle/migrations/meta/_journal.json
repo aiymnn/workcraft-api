@@ -6,14 +6,21 @@
       "idx": 0,
       "version": "5",
       "when": 1789800915710,
-      "tag": "0000_milky_justin_hammer",
+      "tag": "0000_init_users",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "5",
       "when": 1789801435392,
-      "tag": "0001_dashing_aaron_stack",
+      "tag": "0001_add_rbac",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1789837647887,
+      "tag": "0002_studio_ops_domain",
       "breakpoints": true
     }
   ]

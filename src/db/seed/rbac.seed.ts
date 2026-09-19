@@ -21,6 +21,34 @@ const permissionDefinitions = [
   ["settings.manage", "Manage system settings"],
 
   ["system.manage", "Manage system"],
+
+  ["clients.view", "View clients"],
+  ["clients.create", "Create clients"],
+  ["clients.update", "Update clients"],
+  ["clients.delete", "Delete clients"],
+
+  ["quotations.view", "View quotations"],
+  ["quotations.create", "Create quotations"],
+  ["quotations.update", "Update quotations"],
+  ["quotations.delete", "Delete quotations"],
+
+  ["jobs.view", "View jobs"],
+  ["jobs.create", "Create jobs"],
+  ["jobs.update", "Update jobs"],
+  ["jobs.delete", "Delete jobs"],
+
+  ["money.view", "View money"],
+  ["money.create", "Create money records"],
+  ["money.update", "Update money records"],
+  ["money.delete", "Delete money records"],
+
+  ["team.view", "View team"],
+  ["team.manage", "Manage team"],
+
+  ["calendar.view", "View calendar"],
+
+  ["pricing.view", "View pricing"],
+  ["pricing.manage", "Manage pricing"],
 ] as const;
 
 const roleDefinitions = [
@@ -56,9 +84,48 @@ const adminPermissions = [
   "permissions.view",
 
   "settings.view",
+  "settings.manage",
+
+  "clients.view",
+  "clients.create",
+  "clients.update",
+  "clients.delete",
+
+  "quotations.view",
+  "quotations.create",
+  "quotations.update",
+  "quotations.delete",
+
+  "jobs.view",
+  "jobs.create",
+  "jobs.update",
+  "jobs.delete",
+
+  "money.view",
+  "money.create",
+  "money.update",
+  "money.delete",
+
+  "team.view",
+  "team.manage",
+
+  "calendar.view",
+
+  "pricing.view",
+  "pricing.manage",
 ] as const;
 
-const managerPermissions = ["users.view"] as const;
+const managerPermissions = [
+  "users.view",
+  "clients.view",
+  "quotations.view",
+  "jobs.view",
+  "money.view",
+  "team.view",
+  "calendar.view",
+  "pricing.view",
+  "settings.view",
+] as const;
 
 async function seedRbac() {
   console.log("Seeding RBAC...");

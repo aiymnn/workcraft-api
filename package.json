@@ -10,7 +10,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed:rbac": "tsx src/db/seed/rbac.seed.ts",
+    "db:seed:admin": "tsx src/db/seed/system-admin.seed.ts",
+    "db:seed:studio": "tsx src/db/seed/studio.seed.ts"
   },
   "keywords": [],
   "author": "",
