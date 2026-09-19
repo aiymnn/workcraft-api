@@ -1,0 +1,82 @@
+openapi: 3.0.3
+
+info:
+  title: Workcraft API
+  description: API contract and documentation for Workcraft
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: System
+    description: System endpoints
+
+paths:
+  /api/health:
+    get:
+      summary: Check API health
+      operationId: getHealth
+      tags:
+        - System
+      responses:
+        "200":
+          description: API is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/db/health:
+    get:
+      summary: Check database connection
+      operationId: getDatabaseHealth
+      tags:
+        - System
+      responses:
+        "200":
+          description: Database is connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseHealthResponse"
+        "500":
+          description: Database connection failed
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          example: ok
+        message:
+          type: string
+          example: Workcraft API is running
+
+    DatabaseHealthResponse:
+      type: object
+      required:
+        - status
+        - database
+        - result
+      properties:
+        status:
+          type: string
+          example: ok
+        database:
+          type: string
+          example: connected
+        result:
+          type: array
+          items:
+            type: object
+            properties:
+              connected:
+                type: integer
+                example: 1
