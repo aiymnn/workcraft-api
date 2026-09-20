@@ -8,6 +8,8 @@ import {
   createInvoiceSchema,
   createOtherIncomeSchema,
   createPaymentSchema,
+  invoiceSendEmailSchema,
+  invoiceShareMessageSchema,
   updateExpenseSchema,
   updateInvoiceSchema,
   updatePaymentSchema,
@@ -25,12 +27,15 @@ import {
   deletePaymentController,
   getExpenseController,
   getInvoiceController,
+  getInvoicePdfController,
   getPaymentController,
   listDrawingsController,
   listExpensesController,
   listInvoicesController,
   listOtherIncomeController,
   listPaymentsController,
+  sendInvoiceEmailController,
+  shareInvoiceMessageController,
   updateExpenseController,
   updateInvoiceController,
   updatePaymentController,
@@ -58,6 +63,25 @@ router.delete(
   "/invoices/:id",
   requirePermission("money.delete"),
   deleteInvoiceController,
+);
+
+/** Share / send / download the invoice a client sees. */
+router.post(
+  "/invoices/:id/share-message",
+  requirePermission("money.update"),
+  validateBody(invoiceShareMessageSchema),
+  shareInvoiceMessageController,
+);
+router.post(
+  "/invoices/:id/send-email",
+  requirePermission("money.update"),
+  validateBody(invoiceSendEmailSchema),
+  sendInvoiceEmailController,
+);
+router.get(
+  "/invoices/:id/pdf",
+  requirePermission("money.view"),
+  getInvoicePdfController,
 );
 
 router.get("/payments", requirePermission("money.view"), listPaymentsController);

@@ -39,6 +39,10 @@ export const quotations = mysqlTable("quotations", {
 
   publicToken: varchar("public_token", { length: 64 }),
 
+  acceptedAt: timestamp("accepted_at"),
+
+  acceptedVia: mysqlEnum("accepted_via", ["STAFF", "PUBLIC"]),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
 
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

@@ -34,6 +34,8 @@ tags:
     description: Session calendar reads
   - name: Money
     description: Invoices, payments, expenses, drawings, other income
+  - name: Public Quotations
+    description: Client-facing quote page reached by booking-link token
   - name: Portal
     description: Client portal tokens and public payload
   - name: Dashboard
@@ -176,13 +178,49 @@ paths:
                   type: string
       responses:
         "200":
-          description: Login success — accessToken, user, studio, access
+          description: >
+            Login success — accessToken, user, studio, access. When TOTP 2FA is
+            enabled the payload is `{ requires2fa: true, tempToken }` instead.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
         "401":
           description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/auth/login/2fa:
+    post:
+      tags: [Auth]
+      summary: Finish login with a TOTP code
+      operationId: loginTwoFactor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tempToken, code]
+              properties:
+                tempToken:
+                  type: string
+                  description: Short-lived token returned by the first login step
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+      responses:
+        "200":
+          description: Login success — accessToken, user, studio, access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "401":
+          description: Expired temp token or invalid code
           content:
             application/json:
               schema:
@@ -1393,18 +1431,71 @@ paths:
   /api/account/email:
     post:
       tags: [Account]
-      summary: Change email (501 stub)
+      summary: Request an email change
+      description: >
+        Stores a hashed, 24-hour token and emails the new address a confirmation
+        link. Without SMTP the response carries `confirmUrl` instead.
       operationId: changeEmail
       security:
         - bearerAuth: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [newEmail, password]
+              properties:
+                newEmail:
+                  type: string
+                  format: email
+                password:
+                  type: string
       responses:
-        "501":
-          description: Not implemented
+        "200":
+          description: requested, newEmail, expiresAt, emailSent, confirmUrl
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "401":
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Email already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/email/confirm:
+    post:
+      tags: [Account]
+      summary: Confirm an email change (public)
+      description: Reached from the emailed link, so it carries no Bearer token.
+      operationId: confirmEmailChange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "200":
+          description: changed, email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Token invalid or expired
           content:
             application/json:
               schema:
@@ -1413,13 +1504,53 @@ paths:
   /api/account/2fa/enroll:
     post:
       tags: [Account]
-      summary: Enroll 2FA (501 stub)
+      summary: Start TOTP enrollment
+      description: Stores a pending secret; 2FA only turns on after /2fa/confirm.
       operationId: enroll2fa
       security:
         - bearerAuth: []
       responses:
-        "501":
-          description: Not implemented
+        "200":
+          description: secret, otpauthUrl, qrDataUrl
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "409":
+          description: 2FA already enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/2fa/confirm:
+    post:
+      tags: [Account]
+      summary: Confirm TOTP enrollment
+      operationId: confirm2fa
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+      responses:
+        "200":
+          description: enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "400":
+          description: Invalid code or no pending enrollment
           content:
             application/json:
               schema:
@@ -1428,17 +1559,208 @@ paths:
   /api/account/2fa/disable:
     post:
       tags: [Account]
-      summary: Disable 2FA (501 stub)
+      summary: Turn TOTP off
+      description: Confirm with either the account password or a current code.
       operationId: disable2fa
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
       responses:
-        "501":
-          description: Not implemented
+        "200":
+          description: disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "400":
+          description: No proof supplied, or the code was wrong
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /api/account/sessions/revoke-all:
+    post:
+      tags: [Account]
+      summary: Sign out everywhere
+      description: Revokes every session for the user; existing JWTs start returning 401.
+      operationId: revokeAllSessions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: revoked count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/account/oauth/google/start:
+    get:
+      tags: [Account]
+      summary: Begin Google OAuth
+      operationId: startGoogleOauth
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: purpose
+          required: true
+          schema:
+            type: string
+            enum: [calendar, drive]
+        - in: query
+          name: redirect
+          description: Pass `1` to 302 straight to Google instead of returning JSON.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: url
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "302":
+          description: Redirect to Google
+        "503":
+          description: Google is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/oauth/google/callback:
+    get:
+      tags: [Account]
+      summary: Google OAuth callback (public)
+      description: >
+        Google redirects the browser here without an Authorization header; the
+        signed `state` identifies the user. Redirects to
+        `/app/account?google=connected|error`.
+      operationId: googleOauthCallback
+      parameters:
+        - in: query
+          name: code
+          schema:
+            type: string
+        - in: query
+          name: state
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect back to the Account page
+        "503":
+          description: Google is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/oauth/google/disconnect:
+    post:
+      tags: [Account]
+      summary: Disconnect a Google purpose
+      operationId: disconnectGoogle
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose]
+              properties:
+                purpose:
+                  type: string
+                  enum: [calendar, drive]
+      responses:
+        "200":
+          description: disconnected, connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Google is not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/oauth/google/sync:
+    post:
+      tags: [Account]
+      summary: Sync now with Google
+      operationId: syncGoogle
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose]
+              properties:
+                purpose:
+                  type: string
+                  enum: [calendar, drive]
+      responses:
+        "200":
+          description: synced, purpose, syncedAt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "409":
+          description: Not connected, or that purpose is off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/account/footage-portal:
+    post:
+      tags: [Account]
+      summary: Turn the footage portal on or off
+      description: >
+        Upserts the user's `GOOGLE` connection row with the flag only — no OAuth
+        tokens required.
+      operationId: setFootagePortal
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: footagePortalEnabled, connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
 
   /api/quotations:
     get:
@@ -1561,6 +1883,316 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
+
+  /api/quotations/{id}/booking-link:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Quotations]
+      summary: Issue or rotate the public booking link token
+      operationId: issueQuotationBookingLink
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rotate:
+                  type: boolean
+                  description: Replace an existing token
+      responses:
+        "201":
+          description: "{ token, urlPath, quotationId, number }"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Quotation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/quotations/{id}/share-message:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Quotations]
+      summary: Build the WhatsApp / email share message for a quote
+      description: >
+        Ensures a booking-link token, renders the studio template for the channel
+        (falling back to a built-in default) and returns the text plus the public
+        link. No SMTP needed.
+      operationId: shareQuotationMessage
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                markSent:
+                  type: boolean
+                  description: Move a DRAFT quote to SENT
+                channel:
+                  type: string
+                  enum: [whatsapp, email]
+                  default: whatsapp
+      responses:
+        "200":
+          description: "{ text, subject?, waUrl, link, token, status }"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Quotation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/quotations/{id}/send-email:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Quotations]
+      summary: Email the quote link to the client
+      operationId: sendQuotationEmail
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+                  format: email
+                  description: Defaults to the client email on the quote
+                attachPdf:
+                  type: boolean
+                markSent:
+                  type: boolean
+      responses:
+        "200":
+          description: "{ to, subject, link, attachedPdf, messageId, status }"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "400":
+          description: No recipient email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: SMTP not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/quotations/{id}/pdf:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Quotations]
+      summary: Download the quotation PDF
+      operationId: getQuotationPdf
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Quotation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/quotations/{id}/convert:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Quotations]
+      summary: Convert quotation to a CONFIRMED job (needs quotations.update + jobs.create)
+      operationId: convertQuotationToJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        description: Optional session dates for undated quote sessions
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionOverrides:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      quotationSessionId:
+                        type: integer
+                      label:
+                        type: string
+                        nullable: true
+                      startsAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      endsAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      venue:
+                        type: string
+                        nullable: true
+      responses:
+        "200":
+          description: Job already existed for this quotation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "201":
+          description: "{ job, quotation } created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "409":
+          description: Quotation is LOST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/public/quotations/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Public Quotations]
+      summary: Public quote payload (no auth)
+      operationId: getPublicQuotation
+      responses:
+        "200":
+          description: Studio summary, client, quotation with nested arrays
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Unknown token or LOST quotation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/public/quotations/{token}/pdf:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Public Quotations]
+      summary: Download the quotation PDF from the client-facing page (no auth)
+      operationId: getPublicQuotationPdf
+      responses:
+        "200":
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown token or LOST quotation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/public/quotations/{token}/accept:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Public Quotations]
+      summary: Client accepts the quote (no auth); idempotent
+      operationId: acceptPublicQuotation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agreementAccepted]
+              properties:
+                agreementAccepted:
+                  type: boolean
+                  enum: [true]
+                sessions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                      label:
+                        type: string
+                        nullable: true
+                      startsAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      endsAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      venue:
+                        type: string
+                        nullable: true
+      responses:
+        "200":
+          description: "Accepted; `alreadyAccepted` true when it was already ACCEPTED"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Unknown token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Quotation is LOST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/jobs:
     get:
@@ -1878,6 +2510,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
+
+  /api/money/invoices/{id}/share-message:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Money]
+      summary: Build the WhatsApp / email share message for an invoice
+      description: >
+        Issues a fresh portal token for the invoice's job and renders the studio
+        INVOICE template (or a built-in default). No SMTP needed.
+      operationId: shareInvoiceMessage
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                markSent:
+                  type: boolean
+                channel:
+                  type: string
+                  enum: [whatsapp, email]
+                  default: whatsapp
+      responses:
+        "200":
+          description: "{ text, subject?, waUrl, link, token, status }"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Invoice not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/money/invoices/{id}/send-email:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [Money]
+      summary: Email the invoice portal link to the client
+      operationId: sendInvoiceEmail
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+                  format: email
+                attachPdf:
+                  type: boolean
+                markSent:
+                  type: boolean
+      responses:
+        "200":
+          description: "{ to, subject, link, attachedPdf, messageId, status }"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "400":
+          description: No recipient email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: SMTP not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/money/invoices/{id}/pdf:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [Money]
+      summary: Download the invoice PDF
+      operationId: getInvoicePdf
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Invoice not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/money/payments:
     get:
@@ -2273,13 +3009,160 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /api/portal/{token}/invoices/{invoiceId}/pdf:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: invoiceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Portal]
+      summary: Download an invoice PDF from the client portal (no auth)
+      description: The portal token must belong to the invoice's job.
+      operationId: getPortalInvoicePdf
+      responses:
+        "200":
+          description: PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Invalid token or invoice not on this job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/portal/{token}/checkout:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Portal]
+      summary: Start an online (CHIP) payment for an invoice (no auth)
+      description: >-
+        Requires the studio to have CHIP enabled and the server to have
+        CHIP_BRAND_ID, CHIP_API_KEY and CHIP_WEBHOOK_SECRET set. Otherwise
+        responds 503.
+      operationId: createPortalCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invoiceId]
+              properties:
+                invoiceId:
+                  type: integer
+                  minimum: 1
+                milestoneId:
+                  type: integer
+                  minimum: 1
+                  nullable: true
+      responses:
+        "201":
+          description: Hosted checkout URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "404":
+          description: Invalid token or invoice not on this job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Nothing left to pay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Online payment is not available yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/webhooks/chip:
+    post:
+      tags: [Portal]
+      summary: CHIP payment callback (no auth, signature verified)
+      description: >-
+        Raw body signed with the shared secret in X-Signature (verbatim secret
+        or HMAC-SHA256 of the body). Events are de-duplicated by event id in
+        chip_webhook_events; a paid event settles the referenced milestones.
+      operationId: chipWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Received (may be a duplicate or a non-payment event)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+        "401":
+          description: Invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: CHIP is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /api/dashboard:
     get:
       tags: [Dashboard]
-      summary: Studio dashboard KPIs and next sessions
+      summary: Studio dashboard KPIs, profit, cashflow, leads and attention
+      description: >-
+        from/to (ISO dates) win over period; the default window is the last 30
+        days. Adds range, profit, cashflow, leads and attention to the existing
+        kpis, quotations, jobs and nextSessions.
       operationId: getDashboard
       security:
         - bearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["7", "30", "90"]
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Summary
@@ -2287,6 +3170,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
+        "400":
+          description: Invalid period or date range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/pricing:
     get:

@@ -100,3 +100,25 @@ export const issuePortalTokenSchema = z.object({
   jobId: z.number().int().positive(),
   expiresAt: optionalDateTime,
 });
+
+export const portalCheckoutSchema = z.object({
+  invoiceId: z.number().int().positive(),
+  milestoneId: z.number().int().positive().optional().nullable(),
+});
+
+export const invoiceShareMessageSchema = z
+  .object({
+    markSent: z.boolean().optional(),
+    channel: z.enum(["whatsapp", "email"]).optional(),
+  })
+  .optional()
+  .default({});
+
+export const invoiceSendEmailSchema = z
+  .object({
+    to: z.string().trim().email().max(255).optional(),
+    attachPdf: z.boolean().optional(),
+    markSent: z.boolean().optional(),
+  })
+  .optional()
+  .default({});

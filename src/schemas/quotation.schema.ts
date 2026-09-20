@@ -24,7 +24,7 @@ const qtySchema = z
     typeof value === "number" ? value.toFixed(2) : value,
   );
 
-const optionalDateTime = z
+export const optionalDateTime = z
   .union([z.string().datetime({ offset: true }), z.string().min(1), z.null()])
   .optional()
   .nullable();
@@ -91,5 +91,53 @@ export const updateQuotationSchema = z.object({
   contracts: z.array(contractRowSchema).max(20).optional(),
 });
 
+/** Body is optional for these two actions, so default to an empty object. */
+export const bookingLinkSchema = z
+  .object({
+    rotate: z.boolean().optional(),
+  })
+  .optional()
+  .default({});
+
+export const shareChannels = ["whatsapp", "email"] as const;
+
+export const quotationShareMessageSchema = z
+  .object({
+    markSent: z.boolean().optional(),
+    channel: z.enum(shareChannels).optional(),
+  })
+  .optional()
+  .default({});
+
+export const quotationSendEmailSchema = z
+  .object({
+    to: z.string().trim().email().max(255).optional(),
+    attachPdf: z.boolean().optional(),
+    markSent: z.boolean().optional(),
+  })
+  .optional()
+  .default({});
+
+export const sessionOverrideSchema = z.object({
+  quotationSessionId: z.number().int().positive().optional(),
+  label: z.string().trim().max(200).optional().nullable(),
+  startsAt: optionalDateTime,
+  endsAt: optionalDateTime,
+  venue: z.string().trim().max(255).optional().nullable(),
+});
+
+export const convertQuotationSchema = z
+  .object({
+    sessionOverrides: z.array(sessionOverrideSchema).max(50).optional(),
+  })
+  .optional()
+  .default({});
+
 export type CreateQuotationBody = z.infer<typeof createQuotationSchema>;
 export type UpdateQuotationBody = z.infer<typeof updateQuotationSchema>;
+export type BookingLinkBody = z.infer<typeof bookingLinkSchema>;
+export type QuotationShareMessageBody = z.infer<
+  typeof quotationShareMessageSchema
+>;
+export type QuotationSendEmailBody = z.infer<typeof quotationSendEmailSchema>;
+export type ConvertQuotationBody = z.infer<typeof convertQuotationSchema>;

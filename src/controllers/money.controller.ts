@@ -25,6 +25,12 @@ import {
   updatePayment,
 } from "../services/money.service.js";
 import {
+  buildInvoiceShareMessage,
+  getInvoicePdf,
+  sendInvoiceEmail,
+} from "../services/invoice-share.service.js";
+import { MailerError } from "../lib/mailer.js";
+import {
   invoiceStatuses,
   paymentStatuses,
   taxBuckets,
@@ -55,7 +61,7 @@ function parseId(value: unknown): number | null {
 }
 
 function handleError(error: unknown, res: Response, fallback: string) {
-  if (error instanceof MoneyServiceError) {
+  if (error instanceof MoneyServiceError || error instanceof MailerError) {
     return res.status(error.statusCode).json({
       status: "error",
       message: error.message,
@@ -149,6 +155,74 @@ export async function deleteInvoiceController(req: AuthenticatedRequest, res: Re
     return res.status(200).json({ status: "success", data: result });
   } catch (error) {
     return handleError(error, res, "Unable to delete invoice.");
+  }
+}
+
+export async function shareInvoiceMessageController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ status: "error", message: "Invalid invoice id." });
+    }
+    const result = await buildInvoiceShareMessage(studioId, id, {
+      ...(req.body?.markSent !== undefined ? { markSent: req.body.markSent } : {}),
+      ...(req.body?.channel !== undefined ? { channel: req.body.channel } : {}),
+    });
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to build the share message.");
+  }
+}
+
+export async function sendInvoiceEmailController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ status: "error", message: "Invalid invoice id." });
+    }
+    const result = await sendInvoiceEmail(studioId, id, {
+      ...(req.body?.to !== undefined ? { to: req.body.to } : {}),
+      ...(req.body?.attachPdf !== undefined
+        ? { attachPdf: req.body.attachPdf }
+        : {}),
+      ...(req.body?.markSent !== undefined ? { markSent: req.body.markSent } : {}),
+    });
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to send the invoice email.");
+  }
+}
+
+export async function getInvoicePdfController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ status: "error", message: "Invalid invoice id." });
+    }
+    const pdf = await getInvoicePdf(studioId, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${pdf.filename}"`,
+    );
+    return res.status(200).send(pdf.buffer);
+  } catch (error) {
+    return handleError(error, res, "Unable to build the invoice PDF.");
   }
 }
 

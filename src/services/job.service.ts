@@ -91,7 +91,7 @@ function parseDate(value: string | null | undefined, required = false): Date | n
   return date;
 }
 
-function formatJobNumber(id: number, at = new Date()) {
+export function formatJobNumber(id: number, at = new Date()) {
   return `JOB-${at.getFullYear()}-${String(id).padStart(4, "0")}`;
 }
 

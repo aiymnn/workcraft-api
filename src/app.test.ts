@@ -100,8 +100,10 @@ describe("Slice 1 studio APIs", () => {
       id: login.body.data.studio.id,
     });
 
-    const stub2fa = await request(app).post("/api/account/2fa/enroll").set(auth).send({});
-    expect(stub2fa.status).toBe(501);
+    expect(profile.body.data.connections).toMatchObject({
+      googleConfigured: expect.any(Boolean),
+      footagePortalEnabled: expect.any(Boolean),
+    });
   });
 
   it("settings templates list and package create/delete", async () => {
@@ -210,6 +212,207 @@ describe("Slice 1 studio APIs", () => {
     const quoteId = created.body.data.quotation.id as number;
     await request(app).delete(`/api/quotations/${quoteId}`).set(auth);
     await request(app).delete(`/api/clients/${clientId}`).set(auth);
+  });
+
+  it("booking link + public quote accept is idempotent", async () => {
+    expect(email).toBeTruthy();
+    expect(password).toBeTruthy();
+
+    const login = await request(app).post("/api/auth/login").send({
+      email,
+      password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const clientRes = await request(app)
+      .post("/api/clients")
+      .set(auth)
+      .send({ name: `Public quote client ${Date.now()}` });
+    const clientId = clientRes.body.data.client.id as number;
+
+    const created = await request(app)
+      .post("/api/quotations")
+      .set(auth)
+      .send({
+        clientId,
+        status: "SENT",
+        lineItems: [{ name: "Package A", quantity: 1, unitPrice: 1200 }],
+        sessions: [{ label: "Nikah", venue: "Masjid" }],
+        contracts: [{ name: "Terms", body: "Agreement body" }],
+      });
+    expect(created.status).toBe(201);
+    const quoteId = created.body.data.quotation.id as number;
+
+    const link = await request(app)
+      .post(`/api/quotations/${quoteId}/booking-link`)
+      .set(auth)
+      .send({});
+    expect(link.status).toBe(201);
+    expect(link.body.data.token).toBeTruthy();
+    expect(link.body.data.urlPath).toBe(`/quote/${link.body.data.token}`);
+    const token = link.body.data.token as string;
+
+    const rotated = await request(app)
+      .post(`/api/quotations/${quoteId}/booking-link`)
+      .set(auth)
+      .send({ rotate: true });
+    expect(rotated.status).toBe(201);
+    expect(rotated.body.data.token).not.toBe(token);
+    const liveToken = rotated.body.data.token as string;
+
+    const stale = await request(app).get(`/api/public/quotations/${token}`);
+    expect(stale.status).toBe(404);
+
+    const publicQuote = await request(app).get(
+      `/api/public/quotations/${liveToken}`,
+    );
+    expect(publicQuote.status).toBe(200);
+    expect(publicQuote.body.data.quotation.id).toBe(quoteId);
+    expect(publicQuote.body.data.quotation.status).toBe("SENT");
+    expect(publicQuote.body.data.studio.name).toBeTruthy();
+    expect(publicQuote.body.data.client.id).toBe(clientId);
+
+    const missingAgreement = await request(app)
+      .post(`/api/public/quotations/${liveToken}/accept`)
+      .send({});
+    expect(missingAgreement.status).toBe(400);
+
+    const sessionId = publicQuote.body.data.quotation.sessions[0].id as number;
+    const accepted = await request(app)
+      .post(`/api/public/quotations/${liveToken}/accept`)
+      .send({
+        agreementAccepted: true,
+        sessions: [
+          { id: sessionId, startsAt: "2026-12-12T02:00:00.000Z", venue: "Hall B" },
+        ],
+      });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.data.alreadyAccepted).toBe(false);
+    expect(accepted.body.data.quotation.status).toBe("ACCEPTED");
+    expect(accepted.body.data.quotation.acceptedVia).toBe("PUBLIC");
+    expect(accepted.body.data.quotation.acceptedAt).toBeTruthy();
+    expect(accepted.body.data.quotation.sessions[0].venue).toBe("Hall B");
+    expect(accepted.body.data.quotation.sessions[0].startsAt).toBeTruthy();
+
+    const again = await request(app)
+      .post(`/api/public/quotations/${liveToken}/accept`)
+      .send({ agreementAccepted: true });
+    expect(again.status).toBe(200);
+    expect(again.body.data.alreadyAccepted).toBe(true);
+
+    // Converting an already-accepted quote keeps the PUBLIC acceptance trail.
+    const convert = await request(app)
+      .post(`/api/quotations/${quoteId}/convert`)
+      .set(auth)
+      .send({});
+    expect(convert.status).toBe(201);
+    expect(convert.body.data.quotation.acceptedVia).toBe("PUBLIC");
+    expect(convert.body.data.job.quotationId).toBe(quoteId);
+    expect(convert.body.data.job.sessions).toHaveLength(1);
+    expect(convert.body.data.job.contracts[0].status).toBe("DRAFT");
+
+    const jobId = convert.body.data.job.id as number;
+    await request(app).delete(`/api/jobs/${jobId}`).set(auth);
+    await request(app).delete(`/api/quotations/${quoteId}`).set(auth);
+    await request(app).delete(`/api/clients/${clientId}`).set(auth);
+  });
+
+  it("convert quotation to job is idempotent and rejects LOST", async () => {
+    expect(email).toBeTruthy();
+    expect(password).toBeTruthy();
+
+    const login = await request(app).post("/api/auth/login").send({
+      email,
+      password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const clientRes = await request(app)
+      .post("/api/clients")
+      .set(auth)
+      .send({ name: `Convert client ${Date.now()}` });
+    const clientId = clientRes.body.data.client.id as number;
+
+    const created = await request(app)
+      .post("/api/quotations")
+      .set(auth)
+      .send({
+        clientId,
+        lineItems: [{ name: "Package B", quantity: 1, unitPrice: 900 }],
+        sessions: [{ label: "Reception", venue: "Garden" }],
+      });
+    expect(created.status).toBe(201);
+    const quoteId = created.body.data.quotation.id as number;
+    expect(created.body.data.quotation.jobId).toBeNull();
+
+    const convert = await request(app)
+      .post(`/api/quotations/${quoteId}/convert`)
+      .set(auth)
+      .send({});
+    expect(convert.status).toBe(201);
+    expect(convert.body.data.quotation.status).toBe("ACCEPTED");
+    expect(convert.body.data.quotation.acceptedVia).toBe("STAFF");
+    expect(convert.body.data.job.status).toBe("CONFIRMED");
+    // Undated quote session falls back to a default start so it lands on the calendar.
+    expect(convert.body.data.job.sessions[0].startsAt).toBeTruthy();
+    expect(convert.body.data.job.sessions[0].label).toBe("Reception");
+
+    const jobId = convert.body.data.job.id as number;
+
+    const secondConvert = await request(app)
+      .post(`/api/quotations/${quoteId}/convert`)
+      .set(auth)
+      .send({});
+    expect(secondConvert.status).toBe(200);
+    expect(secondConvert.body.data.job.id).toBe(jobId);
+
+    const list = await request(app)
+      .get("/api/quotations")
+      .query({ search: created.body.data.quotation.number })
+      .set(auth);
+    expect(list.status).toBe(200);
+    expect(
+      list.body.data.items.find((i: { id: number }) => i.id === quoteId)?.jobId,
+    ).toBe(jobId);
+
+    const lostClient = await request(app)
+      .post("/api/clients")
+      .set(auth)
+      .send({ name: `Lost client ${Date.now()}` });
+    const lostClientId = lostClient.body.data.client.id as number;
+    const lostQuote = await request(app)
+      .post("/api/quotations")
+      .set(auth)
+      .send({ clientId: lostClientId, status: "LOST" });
+    const lostQuoteId = lostQuote.body.data.quotation.id as number;
+
+    const rejected = await request(app)
+      .post(`/api/quotations/${lostQuoteId}/convert`)
+      .set(auth)
+      .send({});
+    expect(rejected.status).toBe(409);
+
+    const lostLink = await request(app)
+      .post(`/api/quotations/${lostQuoteId}/booking-link`)
+      .set(auth)
+      .send({});
+    expect(lostLink.status).toBe(201);
+    const lostPublic = await request(app).get(
+      `/api/public/quotations/${lostLink.body.data.token}`,
+    );
+    expect(lostPublic.status).toBe(404);
+    const lostAccept = await request(app)
+      .post(`/api/public/quotations/${lostLink.body.data.token}/accept`)
+      .send({ agreementAccepted: true });
+    expect(lostAccept.status).toBe(409);
+
+    await request(app).delete(`/api/jobs/${jobId}`).set(auth);
+    await request(app).delete(`/api/quotations/${quoteId}`).set(auth);
+    await request(app).delete(`/api/clients/${clientId}`).set(auth);
+    await request(app).delete(`/api/quotations/${lostQuoteId}`).set(auth);
+    await request(app).delete(`/api/clients/${lostClientId}`).set(auth);
   });
 
   it("jobs create with session and calendar range", async () => {
@@ -368,6 +571,117 @@ describe("Slice 1 studio APIs", () => {
     await request(app).delete(`/api/clients/${clientId}`).set(auth);
   });
 
+  it("share message returns a public link and PDFs download", async () => {
+    expect(email).toBeTruthy();
+    expect(password).toBeTruthy();
+
+    const login = await request(app).post("/api/auth/login").send({
+      email,
+      password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const clientRes = await request(app)
+      .post("/api/clients")
+      .set(auth)
+      .send({
+        name: `Share client ${Date.now()}`,
+        email: "share-client@example.com",
+        phone: "0123456789",
+      });
+    expect(clientRes.status).toBe(201);
+    const clientId = clientRes.body.data.client.id as number;
+
+    const created = await request(app)
+      .post("/api/quotations")
+      .set(auth)
+      .send({
+        clientId,
+        lineItems: [{ name: "Wave B package", quantity: 1, unitPrice: 1500 }],
+        sessions: [{ label: "Nikah", venue: "Studio" }],
+      });
+    expect(created.status).toBe(201);
+    const quoteId = created.body.data.quotation.id as number;
+
+    // Share message must work with no SMTP configured at all.
+    const share = await request(app)
+      .post(`/api/quotations/${quoteId}/share-message`)
+      .set(auth)
+      .send({ channel: "whatsapp", markSent: true });
+    expect(share.status).toBe(200);
+    expect(share.body.data.link).toContain("/quote/");
+    expect(share.body.data.token).toBeTruthy();
+    expect(share.body.data.text).toContain(share.body.data.link);
+    expect(share.body.data.waUrl).toContain("https://wa.me/60123456789");
+    expect(share.body.data.status).toBe("SENT");
+
+    const emailShare = await request(app)
+      .post(`/api/quotations/${quoteId}/share-message`)
+      .set(auth)
+      .send({ channel: "email" });
+    expect(emailShare.status).toBe(200);
+    expect(emailShare.body.data.subject).toBeTruthy();
+
+    const quotePdf = await request(app)
+      .get(`/api/quotations/${quoteId}/pdf`)
+      .set(auth);
+    expect(quotePdf.status).toBe(200);
+    expect(quotePdf.headers["content-type"]).toContain("application/pdf");
+
+    const publicPdf = await request(app).get(
+      `/api/public/quotations/${share.body.data.token}/pdf`,
+    );
+    expect(publicPdf.status).toBe(200);
+    expect(publicPdf.headers["content-type"]).toContain("application/pdf");
+
+    const convert = await request(app)
+      .post(`/api/quotations/${quoteId}/convert`)
+      .set(auth)
+      .send({});
+    expect(convert.status).toBe(201);
+    const jobId = convert.body.data.job.id as number;
+
+    const invoice = await request(app)
+      .post("/api/money/invoices")
+      .set(auth)
+      .send({
+        jobId,
+        milestones: [
+          { label: "Deposit", amount: 500 },
+          { label: "Balance", amount: 1000 },
+        ],
+      });
+    expect(invoice.status).toBe(201);
+    const invoiceId = invoice.body.data.invoice.id as number;
+
+    const invoiceShare = await request(app)
+      .post(`/api/money/invoices/${invoiceId}/share-message`)
+      .set(auth)
+      .send({ markSent: true });
+    expect(invoiceShare.status).toBe(200);
+    expect(invoiceShare.body.data.link).toContain("/portal/");
+    expect(invoiceShare.body.data.text).toContain(invoiceShare.body.data.link);
+    expect(invoiceShare.body.data.status).toBe("SENT");
+
+    const invoicePdf = await request(app)
+      .get(`/api/money/invoices/${invoiceId}/pdf`)
+      .set(auth);
+    expect(invoicePdf.status).toBe(200);
+    expect(invoicePdf.headers["content-type"]).toContain("application/pdf");
+
+    const portalPdf = await request(app).get(
+      `/api/portal/${invoiceShare.body.data.token}/invoices/${invoiceId}/pdf`,
+    );
+    expect(portalPdf.status).toBe(200);
+    expect(portalPdf.headers["content-type"]).toContain("application/pdf");
+
+    await request(app).delete(`/api/money/invoices/${invoiceId}`).set(auth);
+    await request(app).delete(`/api/jobs/${jobId}`).set(auth);
+    await request(app).delete(`/api/quotations/${quoteId}`).set(auth);
+    await request(app).delete(`/api/clients/${clientId}`).set(auth);
+  });
+
   it("dashboard summary and pricing hub", async () => {
     expect(email).toBeTruthy();
     expect(password).toBeTruthy();
@@ -389,6 +703,16 @@ describe("Slice 1 studio APIs", () => {
     });
     expect(dashboard.body.data.quotations.byStatus).toBeTruthy();
     expect(Array.isArray(dashboard.body.data.nextSessions)).toBe(true);
+
+    expect(dashboard.body.data.profit).toMatchObject({
+      income: expect.any(String),
+      expenses: expect.any(String),
+      net: expect.any(String),
+      currency: expect.any(String),
+    });
+    expect(Array.isArray(dashboard.body.data.cashflow)).toBe(true);
+    expect(Array.isArray(dashboard.body.data.leads)).toBe(true);
+    expect(Array.isArray(dashboard.body.data.attention)).toBe(true);
 
     const hub = await request(app).get("/api/pricing").set(auth);
     expect(hub.status).toBe(200);
@@ -416,5 +740,113 @@ describe("Slice 1 studio APIs", () => {
     await request(app)
       .delete(`/api/pricing/calcs/${calc.body.data.calc.id}`)
       .set(auth);
+  });
+
+  it("dashboard honours period and from/to ranges", async () => {
+    expect(email).toBeTruthy();
+    expect(password).toBeTruthy();
+
+    const login = await request(app).post("/api/auth/login").send({
+      email,
+      password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const week = await request(app)
+      .get("/api/dashboard")
+      .query({ period: "7" })
+      .set(auth);
+    expect(week.status).toBe(200);
+    expect(week.body.data.range.period).toBe(7);
+    const weekSpan =
+      new Date(week.body.data.range.to).getTime() -
+      new Date(week.body.data.range.from).getTime();
+    expect(Math.round(weekSpan / 86_400_000)).toBe(7);
+    // One bucket per (partial) week in range.
+    expect(week.body.data.cashflow.length).toBeGreaterThanOrEqual(1);
+    expect(week.body.data.cashflow[0]).toMatchObject({
+      weekStart: expect.any(String),
+      in: expect.any(String),
+      out: expect.any(String),
+    });
+
+    const explicit = await request(app)
+      .get("/api/dashboard")
+      .query({
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-03-31T23:59:59.000Z",
+      })
+      .set(auth);
+    expect(explicit.status).toBe(200);
+    expect(explicit.body.data.range.period).toBeNull();
+    expect(explicit.body.data.range.from).toBe("2026-01-01T00:00:00.000Z");
+
+    const badPeriod = await request(app)
+      .get("/api/dashboard")
+      .query({ period: "45" })
+      .set(auth);
+    expect(badPeriod.status).toBe(400);
+
+    const backwards = await request(app)
+      .get("/api/dashboard")
+      .query({ from: "2026-05-01", to: "2026-04-01" })
+      .set(auth);
+    expect(backwards.status).toBe(400);
+  });
+
+  it("portal checkout and CHIP webhook stay closed without credentials", async () => {
+    expect(email).toBeTruthy();
+    expect(password).toBeTruthy();
+
+    const login = await request(app).post("/api/auth/login").send({
+      email,
+      password,
+    });
+    expect(login.status).toBe(200);
+    const auth = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const clientRes = await request(app)
+      .post("/api/clients")
+      .set(auth)
+      .send({ name: `Checkout client ${Date.now()}` });
+    const clientId = clientRes.body.data.client.id as number;
+
+    const jobRes = await request(app)
+      .post("/api/jobs")
+      .set(auth)
+      .send({
+        clientId,
+        sessions: [{ label: "Nikah", startsAt: "2026-12-01T02:00:00.000Z" }],
+      });
+    const jobId = jobRes.body.data.job.id as number;
+
+    const invoice = await request(app)
+      .post("/api/money/invoices")
+      .set(auth)
+      .send({ jobId, milestones: [{ label: "Deposit", amount: 250 }] });
+    const invoiceId = invoice.body.data.invoice.id as number;
+
+    const tokenRes = await request(app)
+      .post("/api/portal/tokens")
+      .set(auth)
+      .send({ jobId });
+    const token = tokenRes.body.data.token as string;
+
+    // CHIP is off for the seeded studio and credentials are env-gated.
+    const checkout = await request(app)
+      .post(`/api/portal/${token}/checkout`)
+      .send({ invoiceId });
+    expect(checkout.status).toBe(503);
+
+    const webhook = await request(app)
+      .post("/api/webhooks/chip")
+      .set("Content-Type", "application/json")
+      .send({ id: "evt_test", event_type: "purchase.paid" });
+    expect([401, 503]).toContain(webhook.status);
+
+    await request(app).delete(`/api/money/invoices/${invoiceId}`).set(auth);
+    await request(app).delete(`/api/jobs/${jobId}`).set(auth);
+    await request(app).delete(`/api/clients/${clientId}`).set(auth);
   });
 });

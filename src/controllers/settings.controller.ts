@@ -13,6 +13,10 @@ import {
   updateOptionItem,
   updateStudioSettings,
 } from "../services/settings.service.js";
+import {
+  clearStudioLogo,
+  uploadStudioLogo,
+} from "../services/studio-logo.service.js";
 
 function requireStudioId(req: AuthenticatedRequest, res: Response): number | null {
   if (!req.studioId) {
@@ -190,5 +194,40 @@ export async function putRemindersController(
     return res.status(200).json({ status: "success", data: { rules } });
   } catch (error) {
     return handleSettingsError(error, res, "Unable to update reminder rules.");
+  }
+}
+
+export async function uploadStudioLogoController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        status: "error",
+        message: "Logo file field 'logo' is required.",
+      });
+    }
+    const studio = await uploadStudioLogo(studioId, file);
+    return res.status(200).json({ status: "success", data: { studio } });
+  } catch (error) {
+    return handleSettingsError(error, res, "Unable to upload studio logo.");
+  }
+}
+
+export async function clearStudioLogoController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const studio = await clearStudioLogo(studioId);
+    return res.status(200).json({ status: "success", data: { studio } });
+  } catch (error) {
+    return handleSettingsError(error, res, "Unable to clear studio logo.");
   }
 }

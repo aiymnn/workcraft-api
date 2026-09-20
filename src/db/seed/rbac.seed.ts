@@ -49,6 +49,11 @@ const permissionDefinitions = [
 
   ["pricing.view", "View pricing"],
   ["pricing.manage", "Manage pricing"],
+
+  ["equipment.view", "View equipment"],
+  ["equipment.create", "Create equipment"],
+  ["equipment.update", "Update equipment"],
+  ["equipment.delete", "Delete equipment"],
 ] as const;
 
 const roleDefinitions = [
@@ -113,6 +118,11 @@ const adminPermissions = [
 
   "pricing.view",
   "pricing.manage",
+
+  "equipment.view",
+  "equipment.create",
+  "equipment.update",
+  "equipment.delete",
 ] as const;
 
 const managerPermissions = [
@@ -125,6 +135,7 @@ const managerPermissions = [
   "calendar.view",
   "pricing.view",
   "settings.view",
+  "equipment.view",
 ] as const;
 
 async function seedRbac() {

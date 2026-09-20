@@ -644,6 +644,17 @@ export async function listEmailTemplates(studioId: number) {
     .orderBy(asc(emailTemplates.type));
 }
 
+export async function getEmailTemplate(studioId: number, type: string) {
+  const rows = await db
+    .select()
+    .from(emailTemplates)
+    .where(
+      and(eq(emailTemplates.studioId, studioId), eq(emailTemplates.type, type)),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function upsertEmailTemplate(
   studioId: number,
   type: string,
@@ -716,6 +727,20 @@ export async function listWhatsappTemplates(studioId: number) {
     .from(whatsappTemplates)
     .where(eq(whatsappTemplates.studioId, studioId))
     .orderBy(asc(whatsappTemplates.type));
+}
+
+export async function getWhatsappTemplate(studioId: number, type: string) {
+  const rows = await db
+    .select()
+    .from(whatsappTemplates)
+    .where(
+      and(
+        eq(whatsappTemplates.studioId, studioId),
+        eq(whatsappTemplates.type, type),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function upsertWhatsappTemplate(

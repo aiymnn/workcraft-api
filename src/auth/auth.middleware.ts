@@ -3,14 +3,16 @@ import {
   verifyAccessToken,
   type StudioAccess,
 } from "./jwt.js";
+import { isSessionActive } from "./session.service.js";
 
 export interface AuthenticatedRequest extends Request {
   userId?: number;
   studioId?: number;
   studioAccess?: StudioAccess;
+  sessionId?: string;
 }
 
-export function requireAuth(
+export async function requireAuth(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction,
@@ -33,20 +35,45 @@ export function requireAuth(
     });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
+
   try {
-    const payload = verifyAccessToken(token);
-
-    req.userId = payload.userId;
-    req.studioId = payload.studioId;
-    req.studioAccess = payload.access;
-
-    next();
+    payload = verifyAccessToken(token);
   } catch {
     return res.status(401).json({
       status: "error",
       message: "Invalid or expired authentication token.",
     });
   }
+
+  // Tokens carrying a session id die with "Sign out everywhere".
+  if (payload.sid) {
+    let active: boolean;
+    try {
+      active = await isSessionActive(payload.userId, payload.sid);
+    } catch (error) {
+      console.error("Session lookup failed.", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Unable to verify this session.",
+      });
+    }
+
+    if (!active) {
+      return res.status(401).json({
+        status: "error",
+        message: "This session was signed out. Sign in again.",
+      });
+    }
+
+    req.sessionId = payload.sid;
+  }
+
+  req.userId = payload.userId;
+  req.studioId = payload.studioId;
+  req.studioAccess = payload.access;
+
+  next();
 }
 
 /** Requires auth + a studio membership on the token. */

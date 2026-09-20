@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { requireAuth, requireStudio } from "../auth/auth.middleware.js";
 import { requirePermission } from "../auth/permission.middleware.js";
 import { validateBody } from "../middleware/validation.middleware.js";
@@ -22,6 +23,7 @@ import {
 } from "../schemas/settings-templates.schema.js";
 import {
   addOptionItemController,
+  clearStudioLogoController,
   getOptionCatalogController,
   getStudioController,
   listOptionsController,
@@ -30,6 +32,7 @@ import {
   putRemindersController,
   seedOptionCatalogController,
   updateOptionItemController,
+  uploadStudioLogoController,
 } from "../controllers/settings.controller.js";
 import {
   createChecklistController,
@@ -63,6 +66,11 @@ import {
 
 const router = Router();
 
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
+
 router.use(requireAuth, requireStudio);
 
 router.get("/studio", requirePermission("settings.view"), getStudioController);
@@ -71,6 +79,17 @@ router.patch(
   requirePermission("settings.manage"),
   validateBody(updateStudioSchema),
   patchStudioController,
+);
+router.post(
+  "/studio/logo",
+  requirePermission("settings.manage"),
+  logoUpload.single("logo"),
+  uploadStudioLogoController,
+);
+router.delete(
+  "/studio/logo",
+  requirePermission("settings.manage"),
+  clearStudioLogoController,
 );
 
 router.get("/options", requirePermission("settings.view"), listOptionsController);

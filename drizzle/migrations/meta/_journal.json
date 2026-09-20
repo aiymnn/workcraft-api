@@ -22,6 +22,34 @@
       "when": 1789837647887,
       "tag": "0002_studio_ops_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1789892738966,
+      "tag": "0003_quote_public_convert",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1789894815231,
+      "tag": "0004_chip_webhook_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1789908863926,
+      "tag": "0005_email_change_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1789910619040,
+      "tag": "0006_equipment_assets",
+      "breakpoints": true
     }
   ]
 }

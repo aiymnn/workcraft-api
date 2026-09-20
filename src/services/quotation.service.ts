@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   and,
   asc,
@@ -13,6 +14,7 @@ import {
 import { db } from "../db/database.js";
 import { studios } from "../db/schema/studios.js";
 import { clients } from "../db/schema/clients.js";
+import { jobContracts, jobSessions, jobs } from "../db/schema/jobs.js";
 import {
   quotationContracts,
   quotationLineItems,
@@ -20,6 +22,7 @@ import {
   quotationSessions,
   quotations,
 } from "../db/schema/quotations.js";
+import { formatJobNumber, getJob } from "./job.service.js";
 
 export class QuotationServiceError extends Error {
   constructor(
@@ -275,7 +278,7 @@ async function replaceNested(
   );
 }
 
-async function loadNested(quotationIds: number[]) {
+export async function loadQuotationNested(quotationIds: number[]) {
   const empty = {
     lineItems: new Map<number, (typeof quotationLineItems.$inferSelect)[]>(),
     sessions: new Map<number, (typeof quotationSessions.$inferSelect)[]>(),
@@ -335,7 +338,7 @@ async function loadNested(quotationIds: number[]) {
   return empty;
 }
 
-function attachDetail(
+function attachQuotationDetail(
   quote: typeof quotations.$inferSelect,
   client: {
     id: number;
@@ -343,11 +346,13 @@ function attachDetail(
     phone: string | null;
     email: string | null;
   } | null,
-  nested: Awaited<ReturnType<typeof loadNested>>,
+  nested: Awaited<ReturnType<typeof loadQuotationNested>>,
+  jobId: number | null = null,
 ) {
   return {
     ...quote,
     client,
+    jobId,
     lineItems: nested.lineItems.get(quote.id) ?? [],
     sessions: nested.sessions.get(quote.id) ?? [],
     paymentRows: nested.paymentRows.get(quote.id) ?? [],
@@ -400,18 +405,20 @@ export async function listQuotations(params: {
       clientName: clients.name,
       clientPhone: clients.phone,
       clientEmail: clients.email,
+      jobId: jobs.id,
     })
     .from(quotations)
     .innerJoin(clients, eq(quotations.clientId, clients.id))
+    .leftJoin(jobs, eq(jobs.quotationId, quotations.id))
     .where(where)
     .orderBy(desc(quotations.id))
     .limit(pageSize)
     .offset(offset);
 
-  const nested = await loadNested(rows.map((r) => r.quotation.id));
+  const nested = await loadQuotationNested(rows.map((r) => r.quotation.id));
 
   const items = rows.map((row) =>
-    attachDetail(
+    attachQuotationDetail(
       row.quotation,
       {
         id: row.clientId,
@@ -420,6 +427,7 @@ export async function listQuotations(params: {
         email: row.clientEmail,
       },
       nested,
+      row.jobId ?? null,
     ),
   );
 
@@ -442,17 +450,19 @@ export async function getQuotation(studioId: number, id: number) {
       clientName: clients.name,
       clientPhone: clients.phone,
       clientEmail: clients.email,
+      jobId: jobs.id,
     })
     .from(quotations)
     .innerJoin(clients, eq(quotations.clientId, clients.id))
+    .leftJoin(jobs, eq(jobs.quotationId, quotations.id))
     .where(and(eq(quotations.id, id), eq(quotations.studioId, studioId)))
     .limit(1);
 
   const row = rows[0];
   if (!row) return null;
 
-  const nested = await loadNested([row.quotation.id]);
-  return attachDetail(
+  const nested = await loadQuotationNested([row.quotation.id]);
+  return attachQuotationDetail(
     row.quotation,
     {
       id: row.clientId,
@@ -461,6 +471,7 @@ export async function getQuotation(studioId: number, id: number) {
       email: row.clientEmail,
     },
     nested,
+    row.jobId ?? null,
   );
 }
 
@@ -624,4 +635,243 @@ export async function deleteQuotation(studioId: number, id: number) {
     .where(and(eq(quotations.id, id), eq(quotations.studioId, studioId)));
 
   return { id, deleted: true as const };
+}
+
+/**
+ * Public booking link for a quotation. The token is stored in plaintext because
+ * the client-facing quote page is looked up by it (`GET /api/public/quotations/:token`).
+ */
+export async function issueQuotationBookingLink(
+  studioId: number,
+  id: number,
+  options: { rotate?: boolean } = {},
+) {
+  const rows = await db
+    .select({
+      id: quotations.id,
+      number: quotations.number,
+      publicToken: quotations.publicToken,
+    })
+    .from(quotations)
+    .where(and(eq(quotations.id, id), eq(quotations.studioId, studioId)))
+    .limit(1);
+
+  const quote = rows[0];
+  if (!quote) {
+    throw new QuotationServiceError("Quotation not found.", 404);
+  }
+
+  let token = quote.publicToken;
+  if (!token || options.rotate === true) {
+    token = randomBytes(24).toString("base64url");
+    await db
+      .update(quotations)
+      .set({ publicToken: token })
+      .where(and(eq(quotations.id, id), eq(quotations.studioId, studioId)));
+  }
+
+  return {
+    token,
+    urlPath: `/quote/${token}`,
+    quotationId: quote.id,
+    number: quote.number,
+  };
+}
+
+type SessionOverrideInput = {
+  quotationSessionId?: number | null;
+  label?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  venue?: string | null;
+};
+
+/** Quotes often carry undated sessions; a job session needs a real start. */
+function defaultSessionStart(at = new Date()) {
+  const start = new Date(at);
+  start.setDate(start.getDate() + 7);
+  start.setHours(9, 0, 0, 0);
+  return start;
+}
+
+function defaultSessionEnd(start: Date) {
+  const end = new Date(start);
+  end.setHours(17, 0, 0, 0);
+  return end;
+}
+
+function planJobSessions(
+  quoteSessions: (typeof quotationSessions.$inferSelect)[],
+  overrides: SessionOverrideInput[],
+) {
+  const byQuotationSessionId = new Map<number, SessionOverrideInput>();
+  const positional: SessionOverrideInput[] = [];
+  for (const override of overrides) {
+    if (override.quotationSessionId != null) {
+      byQuotationSessionId.set(override.quotationSessionId, override);
+    } else {
+      positional.push(override);
+    }
+  }
+
+  const sources: ((typeof quotationSessions.$inferSelect) | null)[] =
+    quoteSessions.length > 0 ? quoteSessions : [null];
+
+  return sources.map((session, index) => {
+    const override =
+      (session ? byQuotationSessionId.get(session.id) : undefined) ??
+      positional[index];
+
+    const overrideStart = parseDate(override?.startsAt);
+    const usedDefaultStart = overrideStart === null && session?.startsAt == null;
+    const startsAt = overrideStart ?? session?.startsAt ?? defaultSessionStart();
+    const endsAt =
+      parseDate(override?.endsAt) ??
+      session?.endsAt ??
+      (usedDefaultStart ? defaultSessionEnd(startsAt) : null);
+
+    return {
+      ceremonyTypeItemId: session?.ceremonyTypeItemId ?? null,
+      label:
+        override?.label !== undefined
+          ? emptyToNull(override.label)
+          : (session?.label ?? null),
+      startsAt,
+      endsAt,
+      venue:
+        override?.venue !== undefined
+          ? emptyToNull(override.venue)
+          : (session?.venue ?? null),
+    };
+  });
+}
+
+async function findJobIdForQuotation(studioId: number, quotationId: number) {
+  const rows = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(eq(jobs.quotationId, quotationId), eq(jobs.studioId, studioId)),
+    )
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+function isDuplicateQuotationJob(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: string }).code === "ER_DUP_ENTRY"
+  );
+}
+
+async function loadConvertResult(
+  studioId: number,
+  jobId: number,
+  quotationId: number,
+  created: boolean,
+) {
+  const [job, quotation] = await Promise.all([
+    getJob(studioId, jobId),
+    getQuotation(studioId, quotationId),
+  ]);
+  if (!job || !quotation) {
+    throw new QuotationServiceError("Failed to load converted job.", 500);
+  }
+  return { created, job, quotation };
+}
+
+/**
+ * Turn an accepted quote into a CONFIRMED job. Idempotent: the unique index on
+ * `jobs.quotation_id` keeps one job per quotation, and a second call returns the
+ * job that already exists.
+ */
+export async function convertQuotationToJob(
+  studioId: number,
+  id: number,
+  input: { sessionOverrides?: SessionOverrideInput[] } = {},
+) {
+  const quote = await getQuotation(studioId, id);
+  if (!quote) {
+    throw new QuotationServiceError("Quotation not found.", 404);
+  }
+  if (quote.status === "LOST") {
+    throw new QuotationServiceError(
+      "A lost quotation cannot be converted to a job.",
+      409,
+    );
+  }
+
+  const existingJobId = await findJobIdForQuotation(studioId, id);
+  if (existingJobId !== null) {
+    return loadConvertResult(studioId, existingJobId, id, false);
+  }
+
+  const plannedSessions = planJobSessions(
+    quote.sessions,
+    input.sessionOverrides ?? [],
+  );
+
+  let jobId: number;
+  try {
+    jobId = await db.transaction(async (tx) => {
+      const result = await tx.insert(jobs).values({
+        studioId,
+        clientId: quote.clientId,
+        quotationId: quote.id,
+        status: "CONFIRMED",
+      });
+      const newJobId = result[0].insertId;
+
+      await tx
+        .update(jobs)
+        .set({ number: formatJobNumber(newJobId) })
+        .where(eq(jobs.id, newJobId));
+
+      if (plannedSessions.length > 0) {
+        await tx.insert(jobSessions).values(
+          plannedSessions.map((session) => ({
+            jobId: newJobId,
+            ...session,
+          })),
+        );
+      }
+
+      if (quote.contracts.length > 0) {
+        await tx.insert(jobContracts).values(
+          quote.contracts.map((contract) => ({
+            jobId: newJobId,
+            name: contract.name,
+            body: contract.body,
+            status: "DRAFT" as const,
+          })),
+        );
+      }
+
+      if (quote.status !== "ACCEPTED") {
+        await tx
+          .update(quotations)
+          .set({
+            status: "ACCEPTED",
+            acceptedVia: "STAFF",
+            acceptedAt: new Date(),
+          })
+          .where(
+            and(eq(quotations.id, id), eq(quotations.studioId, studioId)),
+          );
+      }
+
+      return newJobId;
+    });
+  } catch (error) {
+    if (isDuplicateQuotationJob(error)) {
+      const racedJobId = await findJobIdForQuotation(studioId, id);
+      if (racedJobId !== null) {
+        return loadConvertResult(studioId, racedJobId, id, false);
+      }
+    }
+    throw error;
+  }
+
+  return loadConvertResult(studioId, jobId, id, true);
 }

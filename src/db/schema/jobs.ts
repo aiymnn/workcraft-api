@@ -5,6 +5,7 @@ import {
   mysqlTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 import { clients } from "./clients.js";
@@ -13,39 +14,44 @@ import { quotations } from "./quotations.js";
 import { studioMembers } from "./studio_members.js";
 import { studios } from "./studios.js";
 
-export const jobs = mysqlTable("jobs", {
-  id: int("id").autoincrement().primaryKey(),
+export const jobs = mysqlTable(
+  "jobs",
+  {
+    id: int("id").autoincrement().primaryKey(),
 
-  studioId: int("studio_id")
-    .notNull()
-    .references(() => studios.id, { onDelete: "cascade" }),
+    studioId: int("studio_id")
+      .notNull()
+      .references(() => studios.id, { onDelete: "cascade" }),
 
-  clientId: int("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "restrict" }),
+    clientId: int("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "restrict" }),
 
-  quotationId: int("quotation_id").references(() => quotations.id, {
-    onDelete: "set null",
-  }),
+    quotationId: int("quotation_id").references(() => quotations.id, {
+      onDelete: "set null",
+    }),
 
-  number: varchar("number", { length: 64 }),
+    number: varchar("number", { length: 64 }),
 
-  status: mysqlEnum("status", ["CONFIRMED", "COMPLETED", "CANCELLED"])
-    .notNull()
-    .default("CONFIRMED"),
+    status: mysqlEnum("status", ["CONFIRMED", "COMPLETED", "CANCELLED"])
+      .notNull()
+      .default("CONFIRMED"),
 
-  jobTypeItemId: int("job_type_item_id"),
+    jobTypeItemId: int("job_type_item_id"),
 
-  leadSourceItemId: int("lead_source_item_id"),
+    leadSourceItemId: int("lead_source_item_id"),
 
-  cancelReasonItemId: int("cancel_reason_item_id"),
+    cancelReasonItemId: int("cancel_reason_item_id"),
 
-  notes: text("notes"),
+    notes: text("notes"),
 
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
 
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  /** One job per quotation; MySQL allows many NULLs in a unique index. */
+  (table) => [uniqueIndex("jobs_quotation_id_uidx").on(table.quotationId)],
+);
 
 export const jobSessions = mysqlTable("job_sessions", {
   id: int("id").autoincrement().primaryKey(),

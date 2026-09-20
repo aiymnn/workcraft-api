@@ -1,45 +1,83 @@
-import { Router } from "express";
-import { authenticateUser, getCurrentUserProfile } from "../auth/auth.service.js";
+import { Router, type Request, type Response } from "express";
+import {
+  authenticateUser,
+  completeTwoFactorLogin,
+  getCurrentUserProfile,
+} from "../auth/auth.service.js";
 import {
   requireAuth,
   type AuthenticatedRequest,
 } from "../auth/auth.middleware.js";
 import { validateBody } from "../middleware/validation.middleware.js";
-import { loginSchema } from "../auth/auth.schema.js";
+import { loginSchema, loginTwoFactorSchema } from "../auth/auth.schema.js";
 
 const router = Router();
+
+function loginContext(req: Request) {
+  return {
+    userAgent: req.headers["user-agent"] ?? null,
+    ipAddress: req.ip ?? null,
+  };
+}
+
+const AUTH_CLIENT_MESSAGES = new Set([
+  "Invalid email or password.",
+  "User account is inactive.",
+  "No studio membership for this account.",
+  "Two-factor session expired. Sign in again.",
+  "Two-factor authentication is not enabled.",
+  "That code is not valid. Try the next one.",
+]);
+
+function respondLoginError(error: unknown, res: Response) {
+  if (error instanceof Error && AUTH_CLIENT_MESSAGES.has(error.message)) {
+    const status =
+      error.message === "No studio membership for this account." ? 403 : 401;
+    return res.status(status).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+
+  console.error("Login error:", error);
+
+  return res.status(500).json({
+    status: "error",
+    message: "Unable to process login.",
+  });
+}
 
 router.post("/login", validateBody(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const result = await authenticateUser(email, password);
+    const result = await authenticateUser(email, password, loginContext(req));
 
     return res.status(200).json({
       status: "success",
       data: result,
     });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message === "Invalid email or password." ||
-        error.message === "User account is inactive." ||
-        error.message === "No studio membership for this account.")
-    ) {
-      const status =
-        error.message === "No studio membership for this account." ? 403 : 401;
-      return res.status(status).json({
-        status: "error",
-        message: error.message,
-      });
-    }
+    return respondLoginError(error, res);
+  }
+});
 
-    console.error("Login error:", error);
+router.post("/login/2fa", validateBody(loginTwoFactorSchema), async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
 
-    return res.status(500).json({
-      status: "error",
-      message: "Unable to process login.",
+    const result = await completeTwoFactorLogin(
+      tempToken,
+      code,
+      loginContext(req),
+    );
+
+    return res.status(200).json({
+      status: "success",
+      data: result,
     });
+  } catch (error) {
+    return respondLoginError(error, res);
   }
 });
 

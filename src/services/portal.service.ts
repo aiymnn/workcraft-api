@@ -61,7 +61,8 @@ export async function issuePortalToken(
   };
 }
 
-export async function getPublicPortal(token: string) {
+/** Resolves a plaintext portal token to its studio + job, or throws 404. */
+export async function resolvePortalToken(token: string) {
   if (!token || token.length < 8) {
     throw new MoneyServiceError("Invalid portal token.", 404);
   }
@@ -84,6 +85,11 @@ export async function getPublicPortal(token: string) {
   if (!portal) {
     throw new MoneyServiceError("Portal link not found or expired.", 404);
   }
+  return portal;
+}
+
+export async function getPublicPortal(token: string) {
+  const portal = await resolvePortalToken(token);
 
   const jobRows = await db
     .select({
@@ -110,9 +116,13 @@ export async function getPublicPortal(token: string) {
       logoUrl: studios.logoUrl,
       portalMessage: studios.portalMessage,
       currency: studios.currency,
+      phone: studios.phone,
+      email: studios.email,
+      address: studios.address,
       payToBank: studios.payToBank,
       payToAccountName: studios.payToAccountName,
       payToAccountNo: studios.payToAccountNo,
+      chipEnabled: studios.chipEnabled,
     })
     .from(studios)
     .where(eq(studios.id, portal.studioId))

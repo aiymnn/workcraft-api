@@ -2,12 +2,20 @@ import type { Response } from "express";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import {
   QuotationServiceError,
+  convertQuotationToJob,
   createQuotation,
   deleteQuotation,
   getQuotation,
+  issueQuotationBookingLink,
   listQuotations,
   updateQuotation,
 } from "../services/quotation.service.js";
+import {
+  buildQuotationShareMessage,
+  getQuotationPdf,
+  sendQuotationEmail,
+} from "../services/quotation-share.service.js";
+import { MailerError } from "../lib/mailer.js";
 import { quotationStatuses } from "../schemas/quotation.schema.js";
 
 function requireStudioId(req: AuthenticatedRequest, res: Response): number | null {
@@ -35,7 +43,7 @@ function parseId(value: unknown): number | null {
 }
 
 function handleError(error: unknown, res: Response, fallback: string) {
-  if (error instanceof QuotationServiceError) {
+  if (error instanceof QuotationServiceError || error instanceof MailerError) {
     return res.status(error.statusCode).json({
       status: "error",
       message: error.message,
@@ -169,5 +177,139 @@ export async function deleteQuotationController(
     return res.status(200).json({ status: "success", data: result });
   } catch (error) {
     return handleError(error, res, "Unable to delete quotation.");
+  }
+}
+
+export async function issueQuotationBookingLinkController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid quotation id.",
+      });
+    }
+
+    const result = await issueQuotationBookingLink(studioId, id, {
+      ...(req.body?.rotate !== undefined ? { rotate: req.body.rotate } : {}),
+    });
+    return res.status(201).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to issue booking link.");
+  }
+}
+
+export async function shareQuotationMessageController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid quotation id.",
+      });
+    }
+
+    const result = await buildQuotationShareMessage(studioId, id, {
+      ...(req.body?.markSent !== undefined
+        ? { markSent: req.body.markSent }
+        : {}),
+      ...(req.body?.channel !== undefined ? { channel: req.body.channel } : {}),
+    });
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to build the share message.");
+  }
+}
+
+export async function sendQuotationEmailController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid quotation id.",
+      });
+    }
+
+    const result = await sendQuotationEmail(studioId, id, {
+      ...(req.body?.to !== undefined ? { to: req.body.to } : {}),
+      ...(req.body?.attachPdf !== undefined
+        ? { attachPdf: req.body.attachPdf }
+        : {}),
+      ...(req.body?.markSent !== undefined
+        ? { markSent: req.body.markSent }
+        : {}),
+    });
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to send the quotation email.");
+  }
+}
+
+export async function getQuotationPdfController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid quotation id.",
+      });
+    }
+
+    const pdf = await getQuotationPdf(studioId, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${pdf.filename}"`,
+    );
+    return res.status(200).send(pdf.buffer);
+  } catch (error) {
+    return handleError(error, res, "Unable to build the quotation PDF.");
+  }
+}
+
+export async function convertQuotationController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid quotation id.",
+      });
+    }
+
+    const { created, ...data } = await convertQuotationToJob(studioId, id, {
+      ...(req.body?.sessionOverrides !== undefined
+        ? { sessionOverrides: req.body.sessionOverrides }
+        : {}),
+    });
+    return res.status(created ? 201 : 200).json({ status: "success", data });
+  } catch (error) {
+    return handleError(error, res, "Unable to convert quotation to job.");
   }
 }
