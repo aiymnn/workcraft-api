@@ -21,6 +21,7 @@ import {
   getEmailTemplate,
   getWhatsappTemplate,
 } from "./settings-templates.service.js";
+import { createJobActivity } from "./job-activity.service.js";
 
 const FALLBACK_EMAIL_SUBJECT = "Invoice {invoice_number} from {studio}";
 const FALLBACK_EMAIL_BODY =
@@ -192,6 +193,14 @@ export async function buildInvoiceShareMessage(
       ? await markInvoiceSent(studioId, context)
       : context.invoice.status;
 
+  await createJobActivity(studioId, context.job.id, {
+    channel: "WHATSAPP",
+    kind: "INVOICE_WA",
+    subject: subject ?? context.invoice.number ?? `Invoice #${context.invoice.id}`,
+    summary: text.slice(0, 2000),
+    invoiceId: context.invoice.id,
+  });
+
   return {
     invoiceId: context.invoice.id,
     number: context.invoice.number,
@@ -263,6 +272,14 @@ export async function sendInvoiceEmail(
     input.markSent === true
       ? await markInvoiceSent(studioId, context)
       : context.invoice.status;
+
+  await createJobActivity(studioId, context.job.id, {
+    channel: "EMAIL",
+    kind: "INVOICE_EMAIL",
+    subject,
+    summary: `Sent invoice email to ${to}`,
+    invoiceId: context.invoice.id,
+  });
 
   return {
     invoiceId: context.invoice.id,

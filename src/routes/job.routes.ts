@@ -12,6 +12,7 @@ import {
   createJobController,
   deleteJobController,
   getJobController,
+  listJobActivityController,
   listJobsController,
   patchChecklistItemController,
   patchDeliverableController,
@@ -23,6 +24,11 @@ const router = Router();
 router.use(requireAuth, requireStudio);
 
 router.get("/", requirePermission("jobs.view"), listJobsController);
+router.get(
+  "/:id/activity",
+  requirePermission("jobs.view"),
+  listJobActivityController,
+);
 router.get("/:id", requirePermission("jobs.view"), getJobController);
 router.post(
   "/",

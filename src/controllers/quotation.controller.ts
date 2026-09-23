@@ -81,12 +81,27 @@ export async function listQuotationsController(
         ? req.query.search.trim()
         : undefined;
 
+    const jobIdRaw =
+      typeof req.query.jobId === "string" ? req.query.jobId : undefined;
+    let jobId: number | undefined;
+    if (jobIdRaw !== undefined && jobIdRaw.trim() !== "") {
+      const parsed = Number(jobIdRaw);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid jobId filter.",
+        });
+      }
+      jobId = parsed;
+    }
+
     const result = await listQuotations({
       studioId,
       page: parsePositiveInt(req.query.page, 1),
       pageSize: parsePositiveInt(req.query.pageSize, 20),
       ...(status !== undefined ? { status } : {}),
       ...(search !== undefined ? { search } : {}),
+      ...(jobId !== undefined ? { jobId } : {}),
     });
 
     return res.status(200).json({ status: "success", data: result });

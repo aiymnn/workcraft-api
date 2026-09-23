@@ -50,6 +50,13 @@
       "when": 1789910619040,
       "tag": "0006_equipment_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1790176848778,
+      "tag": "0007_job_detail_addons",
+      "breakpoints": true
     }
   ]
 }

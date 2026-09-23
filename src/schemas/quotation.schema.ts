@@ -69,6 +69,7 @@ export const contractRowSchema = z.object({
 
 export const createQuotationSchema = z.object({
   clientId: z.number().int().positive(),
+  jobId: z.number().int().positive().optional().nullable(),
   status: z.enum(quotationStatuses).optional(),
   currency: z.string().trim().min(3).max(8).optional(),
   intro: z.string().trim().max(8000).optional().nullable(),
@@ -81,6 +82,7 @@ export const createQuotationSchema = z.object({
 
 export const updateQuotationSchema = z.object({
   clientId: z.number().int().positive().optional(),
+  jobId: z.number().int().positive().optional().nullable(),
   status: z.enum(quotationStatuses).optional(),
   currency: z.string().trim().min(3).max(8).optional(),
   intro: z.string().trim().max(8000).optional().nullable(),

@@ -1,4 +1,5 @@
 import {
+  type AnyMySqlColumn,
   decimal,
   int,
   mysqlEnum,
@@ -9,6 +10,8 @@ import {
 } from "drizzle-orm/mysql-core";
 import { clients } from "./clients.js";
 import { studios } from "./studios.js";
+// jobs ↔ quotations: jobs imports this file; callback + AnyMySqlColumn breaks the cycle.
+import { jobs } from "./jobs.js";
 
 export const quotations = mysqlTable("quotations", {
   id: int("id").autoincrement().primaryKey(),
@@ -20,6 +23,14 @@ export const quotations = mysqlTable("quotations", {
   clientId: int("client_id")
     .notNull()
     .references(() => clients.id, { onDelete: "restrict" }),
+
+  /**
+   * Optional add-on / follow-up link to a job. Source quote from convert still
+   * lives on `jobs.quotation_id`.
+   */
+  jobId: int("job_id").references((): AnyMySqlColumn => jobs.id, {
+    onDelete: "set null",
+  }),
 
   number: varchar("number", { length: 64 }),
 

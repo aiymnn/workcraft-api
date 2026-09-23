@@ -122,6 +122,18 @@ async function assertClientInStudio(studioId: number, clientId: number) {
   }
 }
 
+async function assertJobInStudio(studioId: number, jobId: number) {
+  const rows = await db
+    .select({ id: jobs.id, quotationId: jobs.quotationId })
+    .from(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.studioId, studioId)))
+    .limit(1);
+  if (!rows[0]) {
+    throw new QuotationServiceError("Job not found in this studio.", 400);
+  }
+  return rows[0];
+}
+
 async function allocateQuoteNumber(
   studioId: number,
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -347,8 +359,11 @@ function attachQuotationDetail(
     email: string | null;
   } | null,
   nested: Awaited<ReturnType<typeof loadQuotationNested>>,
-  jobId: number | null = null,
+  /** Job linked via jobs.quotation_id (source quote from convert). */
+  sourceJobId: number | null = null,
 ) {
+  // Prefer explicit add-on link; fall back to the convert source link.
+  const jobId = quote.jobId ?? sourceJobId;
   return {
     ...quote,
     client,
@@ -367,6 +382,7 @@ export async function listQuotations(params: {
   pageSize: number;
   status?: (typeof quotations.$inferSelect)["status"];
   search?: string;
+  jobId?: number;
 }) {
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
@@ -387,6 +403,33 @@ export async function listQuotations(params: {
     if (searchCondition) conditions.push(searchCondition);
   }
 
+  // Filter ?jobId=: include add-ons (quotations.job_id) OR the job's source
+  // quotation (jobs.quotation_id = quotations.id).
+  if (params.jobId !== undefined) {
+    const jobRows = await db
+      .select({ quotationId: jobs.quotationId })
+      .from(jobs)
+      .where(
+        and(eq(jobs.id, params.jobId), eq(jobs.studioId, params.studioId)),
+      )
+      .limit(1);
+    const job = jobRows[0];
+    if (!job) {
+      return {
+        items: [],
+        pagination: { page, pageSize, total: 0, totalPages: 0 },
+      };
+    }
+    const jobFilter =
+      job.quotationId != null
+        ? or(
+            eq(quotations.jobId, params.jobId),
+            eq(quotations.id, job.quotationId),
+          )
+        : eq(quotations.jobId, params.jobId);
+    if (jobFilter) conditions.push(jobFilter);
+  }
+
   const where = and(...conditions);
   const offset = (page - 1) * pageSize;
 
@@ -405,7 +448,7 @@ export async function listQuotations(params: {
       clientName: clients.name,
       clientPhone: clients.phone,
       clientEmail: clients.email,
-      jobId: jobs.id,
+      sourceJobId: jobs.id,
     })
     .from(quotations)
     .innerJoin(clients, eq(quotations.clientId, clients.id))
@@ -427,7 +470,7 @@ export async function listQuotations(params: {
         email: row.clientEmail,
       },
       nested,
-      row.jobId ?? null,
+      row.sourceJobId ?? null,
     ),
   );
 
@@ -450,7 +493,7 @@ export async function getQuotation(studioId: number, id: number) {
       clientName: clients.name,
       clientPhone: clients.phone,
       clientEmail: clients.email,
-      jobId: jobs.id,
+      sourceJobId: jobs.id,
     })
     .from(quotations)
     .innerJoin(clients, eq(quotations.clientId, clients.id))
@@ -471,7 +514,7 @@ export async function getQuotation(studioId: number, id: number) {
       email: row.clientEmail,
     },
     nested,
-    row.jobId ?? null,
+    row.sourceJobId ?? null,
   );
 }
 
@@ -479,6 +522,7 @@ export async function createQuotation(
   studioId: number,
   input: {
     clientId: number;
+    jobId?: number | null;
     status?: "DRAFT" | "SENT" | "ACCEPTED" | "LOST";
     currency?: string;
     intro?: string | null;
@@ -490,6 +534,9 @@ export async function createQuotation(
   },
 ) {
   await assertClientInStudio(studioId, input.clientId);
+  if (input.jobId != null) {
+    await assertJobInStudio(studioId, input.jobId);
+  }
 
   const lineItems = input.lineItems ?? [];
   const totalAmount = computeTotal(lineItems);
@@ -500,6 +547,7 @@ export async function createQuotation(
     const result = await tx.insert(quotations).values({
       studioId,
       clientId: input.clientId,
+      jobId: input.jobId ?? null,
       number: allocated.number,
       status: input.status ?? "DRAFT",
       currency: input.currency ?? allocated.currency,
@@ -544,6 +592,7 @@ export async function updateQuotation(
   id: number,
   input: {
     clientId?: number;
+    jobId?: number | null;
     status?: "DRAFT" | "SENT" | "ACCEPTED" | "LOST";
     currency?: string;
     intro?: string | null;
@@ -562,6 +611,9 @@ export async function updateQuotation(
   if (input.clientId !== undefined) {
     await assertClientInStudio(studioId, input.clientId);
   }
+  if (input.jobId != null) {
+    await assertJobInStudio(studioId, input.jobId);
+  }
 
   const hasNested =
     input.lineItems !== undefined ||
@@ -571,6 +623,7 @@ export async function updateQuotation(
 
   const headerUpdates: Partial<typeof quotations.$inferInsert> = {};
   if (input.clientId !== undefined) headerUpdates.clientId = input.clientId;
+  if (input.jobId !== undefined) headerUpdates.jobId = input.jobId;
   if (input.status !== undefined) headerUpdates.status = input.status;
   if (input.currency !== undefined) headerUpdates.currency = input.currency;
   if (input.intro !== undefined) headerUpdates.intro = emptyToNull(input.intro);

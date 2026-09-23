@@ -10,6 +10,7 @@ import {
   patchDeliverable,
   updateJob,
 } from "../services/job.service.js";
+import { listJobActivity } from "../services/job-activity.service.js";
 import { jobStatuses } from "../schemas/job.schema.js";
 
 function requireStudioId(req: AuthenticatedRequest, res: Response): number | null {
@@ -179,5 +180,23 @@ export async function patchDeliverableController(
     return res.status(200).json({ status: "success", data: { job } });
   } catch (error) {
     return handleError(error, res, "Unable to update deliverable.");
+  }
+}
+
+export async function listJobActivityController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ status: "error", message: "Invalid job id." });
+    }
+    const result = await listJobActivity(studioId, id);
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    return handleError(error, res, "Unable to list job activity.");
   }
 }

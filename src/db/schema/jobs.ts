@@ -1,4 +1,5 @@
 import {
+  type AnyMySqlColumn,
   boolean,
   int,
   mysqlEnum,
@@ -27,7 +28,7 @@ export const jobs = mysqlTable(
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
 
-    quotationId: int("quotation_id").references(() => quotations.id, {
+    quotationId: int("quotation_id").references((): AnyMySqlColumn => quotations.id, {
       onDelete: "set null",
     }),
 
