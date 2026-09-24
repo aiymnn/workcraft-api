@@ -29,6 +29,7 @@ import {
   getInvoiceController,
   getInvoicePdfController,
   getPaymentController,
+  getTaxExportController,
   listDrawingsController,
   listExpensesController,
   listInvoicesController,
@@ -44,6 +45,12 @@ import {
 const router = Router();
 
 router.use(requireAuth, requireStudio);
+
+router.get(
+  "/tax-export",
+  requirePermission("money.view"),
+  getTaxExportController,
+);
 
 router.get("/invoices", requirePermission("money.view"), listInvoicesController);
 router.get("/invoices/:id", requirePermission("money.view"), getInvoiceController);

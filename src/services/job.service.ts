@@ -8,6 +8,7 @@ import {
   inArray,
   like,
   lte,
+  ne,
   or,
   type SQL,
 } from "drizzle-orm";
@@ -363,12 +364,16 @@ export async function listJobs(params: {
   pageSize: number;
   status?: (typeof jobs.$inferSelect)["status"];
   search?: string;
+  clientId?: number;
 }) {
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
   const conditions: SQL[] = [eq(jobs.studioId, params.studioId)];
 
   if (params.status) conditions.push(eq(jobs.status, params.status));
+  if (params.clientId !== undefined) {
+    conditions.push(eq(jobs.clientId, params.clientId));
+  }
 
   if (params.search) {
     const term = `%${params.search}%`;
@@ -723,6 +728,7 @@ export async function listCalendarSessions(params: {
     .where(
       and(
         eq(jobs.studioId, params.studioId),
+        ne(jobs.status, "CANCELLED"),
         gte(jobSessions.startsAt, params.from),
         lte(jobSessions.startsAt, params.to),
       ),

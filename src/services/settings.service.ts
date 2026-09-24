@@ -195,7 +195,7 @@ export async function seedOptionCatalog(studioId: number, key: OptionListKey) {
   const catalog = await getOptionCatalog(studioId, key);
 
   if (catalog.seeded) {
-    throw new SettingsServiceError("List is already editable.", 400);
+    return catalog;
   }
 
   const labels =
@@ -209,19 +209,32 @@ export async function seedOptionCatalog(studioId: number, key: OptionListKey) {
     return getOptionCatalog(studioId, key);
   }
 
+  const existingLabels = new Set(
+    catalog.items.map((item) => item.label.trim().toLowerCase()),
+  );
+  const toInsert = labels.filter(
+    (label) => !existingLabels.has(label.trim().toLowerCase()),
+  );
+  const baseSort =
+    catalog.items.length === 0
+      ? 0
+      : Math.max(...catalog.items.map((i) => i.sortOrder)) + 1;
+
   await db.transaction(async (tx) => {
     await tx
       .update(optionLists)
       .set({ seeded: true })
       .where(eq(optionLists.id, catalog.id));
 
-    await tx.insert(optionItems).values(
-      labels.map((label, index) => ({
-        listId: catalog.id,
-        label,
-        sortOrder: index,
-      })),
-    );
+    if (toInsert.length > 0) {
+      await tx.insert(optionItems).values(
+        toInsert.map((label, index) => ({
+          listId: catalog.id,
+          label,
+          sortOrder: baseSort + index,
+        })),
+      );
+    }
   });
 
   return getOptionCatalog(studioId, key);
@@ -244,6 +257,13 @@ export async function addOptionItem(
   const trimmed = label.trim();
   if (!trimmed) {
     throw new SettingsServiceError("Label is required.", 400);
+  }
+
+  const existing = catalog.items.find(
+    (item) => item.label.trim().toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (existing) {
+    return { catalog, itemId: existing.id };
   }
 
   const sortOrder =

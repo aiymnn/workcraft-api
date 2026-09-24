@@ -95,6 +95,20 @@ export async function listQuotationsController(
       jobId = parsed;
     }
 
+    const clientIdRaw =
+      typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+    let clientId: number | undefined;
+    if (clientIdRaw !== undefined && clientIdRaw.trim() !== "") {
+      const parsed = Number(clientIdRaw);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid clientId filter.",
+        });
+      }
+      clientId = parsed;
+    }
+
     const result = await listQuotations({
       studioId,
       page: parsePositiveInt(req.query.page, 1),
@@ -102,6 +116,7 @@ export async function listQuotationsController(
       ...(status !== undefined ? { status } : {}),
       ...(search !== undefined ? { search } : {}),
       ...(jobId !== undefined ? { jobId } : {}),
+      ...(clientId !== undefined ? { clientId } : {}),
     });
 
     return res.status(200).json({ status: "success", data: result });

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, notInArray } from "drizzle-orm";
 import { db } from "../db/database.js";
 import { users } from "../db/schema/users.js";
 import { roles } from "../db/schema/roles.js";
@@ -15,6 +15,7 @@ import {
   optionItems,
   optionLists,
 } from "../db/schema/option_lists.js";
+import { jobs, jobSessions, sessionCrew } from "../db/schema/jobs.js";
 import { hashPassword } from "../auth/password.js";
 import type { StudioAccess } from "../auth/jwt.js";
 
@@ -125,7 +126,123 @@ async function resolvePlatformRoleName(
   return role.id;
 }
 
+async function systemAdminUserIds(): Promise<number[]> {
+  const rows = await db
+    .select({ userId: userRoles.userId })
+    .from(userRoles)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(eq(roles.name, "SYSTEM_ADMIN"));
+  return rows.map((r) => r.userId);
+}
+
+type MemberStats = { upcomingBookings: number; jobsThisMonth: number };
+
+async function memberAssignmentStats(
+  studioId: number,
+  memberIds: number[],
+): Promise<Map<number, MemberStats>> {
+  const map = new Map<number, MemberStats>();
+  for (const id of memberIds) {
+    map.set(id, { upcomingBookings: 0, jobsThisMonth: 0 });
+  }
+  if (memberIds.length === 0) return map;
+
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const monthEnd = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  );
+
+  const rows = await db
+    .select({
+      memberId: sessionCrew.studioMemberId,
+      jobId: jobs.id,
+      startsAt: jobSessions.startsAt,
+    })
+    .from(sessionCrew)
+    .innerJoin(jobSessions, eq(sessionCrew.sessionId, jobSessions.id))
+    .innerJoin(jobs, eq(jobSessions.jobId, jobs.id))
+    .where(
+      and(
+        eq(jobs.studioId, studioId),
+        inArray(sessionCrew.studioMemberId, memberIds),
+        ne(jobs.status, "CANCELLED"),
+      ),
+    );
+
+  const upcomingSessions = new Map<number, Set<number>>();
+  const monthJobs = new Map<number, Set<number>>();
+
+  for (const row of rows) {
+    if (row.memberId == null) continue;
+    const starts = row.startsAt instanceof Date ? row.startsAt : new Date(row.startsAt);
+    if (starts.getTime() >= now.getTime()) {
+      const set = upcomingSessions.get(row.memberId) ?? new Set();
+      set.add(row.jobId);
+      upcomingSessions.set(row.memberId, set);
+    }
+    if (starts.getTime() >= monthStart.getTime() && starts.getTime() < monthEnd.getTime()) {
+      const set = monthJobs.get(row.memberId) ?? new Set();
+      set.add(row.jobId);
+      monthJobs.set(row.memberId, set);
+    }
+  }
+
+  for (const id of memberIds) {
+    map.set(id, {
+      upcomingBookings: upcomingSessions.get(id)?.size ?? 0,
+      jobsThisMonth: monthJobs.get(id)?.size ?? 0,
+    });
+  }
+  return map;
+}
+
+async function crewJobCounts(
+  studioId: number,
+  crewIds: number[],
+): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  for (const id of crewIds) map.set(id, 0);
+  if (crewIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      crewId: sessionCrew.crewContactId,
+      jobId: jobs.id,
+    })
+    .from(sessionCrew)
+    .innerJoin(jobSessions, eq(sessionCrew.sessionId, jobSessions.id))
+    .innerJoin(jobs, eq(jobSessions.jobId, jobs.id))
+    .where(
+      and(
+        eq(jobs.studioId, studioId),
+        inArray(sessionCrew.crewContactId, crewIds),
+        ne(jobs.status, "CANCELLED"),
+      ),
+    );
+
+  const byCrew = new Map<number, Set<number>>();
+  for (const row of rows) {
+    if (row.crewId == null) continue;
+    const set = byCrew.get(row.crewId) ?? new Set();
+    set.add(row.jobId);
+    byCrew.set(row.crewId, set);
+  }
+  for (const id of crewIds) {
+    map.set(id, byCrew.get(id)?.size ?? 0);
+  }
+  return map;
+}
+
 export async function listTeamMembers(studioId: number) {
+  const excludeUserIds = await systemAdminUserIds();
+  const conditions = [eq(studioMembers.studioId, studioId)];
+  if (excludeUserIds.length > 0) {
+    conditions.push(notInArray(studioMembers.userId, excludeUserIds));
+  }
+
   const rows = await db
     .select({
       id: studioMembers.id,
@@ -141,24 +258,36 @@ export async function listTeamMembers(studioId: number) {
     })
     .from(studioMembers)
     .innerJoin(users, eq(studioMembers.userId, users.id))
-    .where(eq(studioMembers.studioId, studioId))
+    .where(and(...conditions))
     .orderBy(asc(studioMembers.id));
 
   const craftsByMember = await getMemberCrafts(rows.map((r) => r.id));
+  const statsByMember = await memberAssignmentStats(
+    studioId,
+    rows.map((r) => r.id),
+  );
 
-  return rows.map((row) => ({
-    id: row.id,
-    studioId: row.studioId,
-    userId: row.userId,
-    access: row.access as StudioAccess,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    status: row.status,
-    crafts: craftsByMember.get(row.id) ?? [],
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }));
+  return rows.map((row) => {
+    const stats = statsByMember.get(row.id) ?? {
+      upcomingBookings: 0,
+      jobsThisMonth: 0,
+    };
+    return {
+      id: row.id,
+      studioId: row.studioId,
+      userId: row.userId,
+      access: row.access as StudioAccess,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      status: row.status,
+      crafts: craftsByMember.get(row.id) ?? [],
+      upcomingBookings: stats.upcomingBookings,
+      jobsThisMonth: stats.jobsThisMonth,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  });
 }
 
 export async function getTeamMember(studioId: number, memberId: number) {
@@ -348,10 +477,16 @@ export async function listCrewContacts(
     .orderBy(asc(crewContacts.name));
 
   const craftsByCrew = await getCrewCrafts(rows.map((r) => r.id));
+  const jobCounts = await crewJobCounts(
+    studioId,
+    rows.map((r) => r.id),
+  );
 
   return rows.map((row) => ({
     ...row,
     crafts: craftsByCrew.get(row.id) ?? [],
+    jobs: jobCounts.get(row.id) ?? 0,
+    paidSoFar: 0,
   }));
 }
 
@@ -365,7 +500,13 @@ export async function getCrewContact(studioId: number, id: number) {
   if (!row) return null;
 
   const crafts = await getCrewCrafts([row.id]);
-  return { ...row, crafts: crafts.get(row.id) ?? [] };
+  const jobCounts = await crewJobCounts(studioId, [row.id]);
+  return {
+    ...row,
+    crafts: crafts.get(row.id) ?? [],
+    jobs: jobCounts.get(row.id) ?? 0,
+    paidSoFar: 0,
+  };
 }
 
 export async function createCrewContact(

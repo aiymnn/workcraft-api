@@ -1,6 +1,20 @@
-import { and, count, eq, isNull, like, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  like,
+  min,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "../db/database.js";
 import { clients } from "../db/schema/clients.js";
+import { jobs, jobSessions } from "../db/schema/jobs.js";
+import { payments } from "../db/schema/money.js";
 
 export class ClientServiceError extends Error {
   constructor(
@@ -14,10 +28,98 @@ export class ClientServiceError extends Error {
 
 export type ClientRecord = typeof clients.$inferSelect;
 
+export type ClientWithStats = ClientRecord & {
+  jobCount: number;
+  lifetimePaid: number;
+  soon: boolean;
+  cameBack: boolean;
+  nextSessionAt: string | null;
+};
+
 function emptyToNull(value: string | null | undefined) {
   if (value === undefined || value === null) return null;
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+async function attachClientStats(
+  studioId: number,
+  items: ClientRecord[],
+): Promise<ClientWithStats[]> {
+  if (items.length === 0) return [];
+
+  const clientIds = items.map((c) => c.id);
+  const now = new Date();
+
+  const jobCountRows = await db
+    .select({
+      clientId: jobs.clientId,
+      jobCount: count(),
+    })
+    .from(jobs)
+    .where(
+      and(eq(jobs.studioId, studioId), inArray(jobs.clientId, clientIds)),
+    )
+    .groupBy(jobs.clientId);
+
+  const paidRows = await db
+    .select({
+      clientId: jobs.clientId,
+      lifetimePaid: sql<string>`coalesce(sum(${payments.amount}), 0)`,
+    })
+    .from(payments)
+    .innerJoin(jobs, eq(payments.jobId, jobs.id))
+    .where(
+      and(
+        eq(payments.studioId, studioId),
+        eq(payments.status, "PAID"),
+        inArray(jobs.clientId, clientIds),
+      ),
+    )
+    .groupBy(jobs.clientId);
+
+  const nextSessionRows = await db
+    .select({
+      clientId: jobs.clientId,
+      nextSessionAt: min(jobSessions.startsAt),
+    })
+    .from(jobSessions)
+    .innerJoin(jobs, eq(jobSessions.jobId, jobs.id))
+    .where(
+      and(
+        eq(jobs.studioId, studioId),
+        inArray(jobs.clientId, clientIds),
+        gt(jobSessions.startsAt, now),
+      ),
+    )
+    .groupBy(jobs.clientId);
+
+  const jobCountByClient = new Map(
+    jobCountRows.map((r) => [r.clientId, Number(r.jobCount)]),
+  );
+  const paidByClient = new Map(
+    paidRows.map((r) => [r.clientId, Number(r.lifetimePaid) || 0]),
+  );
+  const nextByClient = new Map(
+    nextSessionRows.map((r) => [
+      r.clientId,
+      r.nextSessionAt ? r.nextSessionAt.toISOString() : null,
+    ]),
+  );
+
+  return items.map((client) => {
+    const jobCount = jobCountByClient.get(client.id) ?? 0;
+    const lifetimePaid = paidByClient.get(client.id) ?? 0;
+    const nextSessionAt = nextByClient.get(client.id) ?? null;
+    return {
+      ...client,
+      jobCount,
+      lifetimePaid,
+      soon: nextSessionAt != null,
+      cameBack: jobCount >= 2,
+      nextSessionAt,
+    };
+  });
 }
 
 export async function listClients(params: {
@@ -63,8 +165,10 @@ export async function listClients(params: {
     .limit(pageSize)
     .offset(offset);
 
+  const withStats = await attachClientStats(params.studioId, items);
+
   return {
-    items,
+    items: withStats,
     pagination: {
       page,
       pageSize,
@@ -81,7 +185,10 @@ export async function getClient(studioId: number, id: number) {
     .where(and(eq(clients.id, id), eq(clients.studioId, studioId)))
     .limit(1);
 
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  const [withStats] = await attachClientStats(studioId, [row]);
+  return withStats ?? null;
 }
 
 export async function createClient(

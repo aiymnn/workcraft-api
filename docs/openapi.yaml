@@ -2955,6 +2955,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiSuccess"
 
+  /api/money/tax-export:
+    get:
+      tags: [Money]
+      summary: Download year books CSV for tax agent
+      operationId: getTaxExport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 2026
+          description: Calendar year YYYY
+      responses:
+        "200":
+          description: CSV attachment (books export, not Form B)
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid or missing year
+
   /api/portal/tokens:
     post:
       tags: [Portal]

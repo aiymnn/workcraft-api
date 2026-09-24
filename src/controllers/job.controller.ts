@@ -72,12 +72,27 @@ export async function listJobsController(req: AuthenticatedRequest, res: Respons
         ? req.query.search.trim()
         : undefined;
 
+    const clientIdRaw =
+      typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+    let clientId: number | undefined;
+    if (clientIdRaw !== undefined && clientIdRaw.trim() !== "") {
+      const parsed = Number(clientIdRaw);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid clientId filter.",
+        });
+      }
+      clientId = parsed;
+    }
+
     const result = await listJobs({
       studioId,
       page: parsePositiveInt(req.query.page, 1),
       pageSize: parsePositiveInt(req.query.pageSize, 20),
       ...(status !== undefined ? { status } : {}),
       ...(search !== undefined ? { search } : {}),
+      ...(clientId !== undefined ? { clientId } : {}),
     });
 
     return res.status(200).json({ status: "success", data: result });

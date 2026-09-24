@@ -4,7 +4,9 @@ import {
   count,
   desc,
   eq,
+  gte,
   inArray,
+  lt,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -626,4 +628,196 @@ export async function deleteOtherIncome(studioId: number, id: number) {
     .delete(otherIncome)
     .where(and(eq(otherIncome.id, id), eq(otherIncome.studioId, studioId)));
   return { id, deleted: true as const };
+}
+
+/* ── Tax agent CSV export ──────────────────────────────────── */
+
+function csvCell(value: string | number | null | undefined): string {
+  const s = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function moneyNum(value: string | number | null | undefined): number {
+  const n = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isoDate(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+/** Year books export for the studio's tax agent (not Form B). */
+export async function buildTaxExportCsv(studioId: number, year: number) {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new MoneyServiceError("Invalid year. Use YYYY between 2000 and 2100.", 400);
+  }
+
+  const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
+
+  const [paidRows, otherRows, expenseRows, drawingRows] = await Promise.all([
+    db
+      .select()
+      .from(payments)
+      .where(
+        and(
+          eq(payments.studioId, studioId),
+          eq(payments.status, "PAID"),
+          gte(payments.paidAt, start),
+          lt(payments.paidAt, end),
+        ),
+      )
+      .orderBy(asc(payments.paidAt), asc(payments.id)),
+    db
+      .select()
+      .from(otherIncome)
+      .where(
+        and(
+          eq(otherIncome.studioId, studioId),
+          gte(otherIncome.receivedAt, start),
+          lt(otherIncome.receivedAt, end),
+        ),
+      )
+      .orderBy(asc(otherIncome.receivedAt), asc(otherIncome.id)),
+    db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.studioId, studioId),
+          gte(expenses.spentAt, start),
+          lt(expenses.spentAt, end),
+        ),
+      )
+      .orderBy(asc(expenses.spentAt), asc(expenses.id)),
+    db
+      .select()
+      .from(ownerDrawings)
+      .where(
+        and(
+          eq(ownerDrawings.studioId, studioId),
+          gte(ownerDrawings.drawnAt, start),
+          lt(ownerDrawings.drawnAt, end),
+        ),
+      )
+      .orderBy(asc(ownerDrawings.drawnAt), asc(ownerDrawings.id)),
+  ]);
+
+  const incomePayments = paidRows.reduce((s, r) => s + moneyNum(r.amount), 0);
+  const incomeOther = otherRows.reduce((s, r) => s + moneyNum(r.amount), 0);
+  const claimable = expenseRows
+    .filter((r) => r.taxBucket === "CLAIMABLE")
+    .reduce((s, r) => s + moneyNum(r.amount), 0);
+  const equipment = expenseRows
+    .filter((r) => r.taxBucket === "EQUIPMENT")
+    .reduce((s, r) => s + moneyNum(r.amount), 0);
+  const notClaimable = expenseRows
+    .filter((r) => r.taxBucket === "NOT_CLAIMABLE" || r.taxBucket === "DRAWING")
+    .reduce((s, r) => s + moneyNum(r.amount), 0);
+  const drawingsTotal = drawingRows.reduce((s, r) => s + moneyNum(r.amount), 0);
+  const totalIncome = incomePayments + incomeOther;
+  const totalExpenses = claimable + equipment + notClaimable;
+
+  const lines: string[] = [];
+  lines.push(`Workcraft tax books export,${csvCell(year)}`);
+  lines.push(
+    "Note,Books export for your tax agent — not a filed Form B. Your agent has the final say.",
+  );
+  lines.push("");
+  lines.push("SECTION,Summary");
+  lines.push("Metric,Amount (RM)");
+  lines.push(`PAID client payments,${incomePayments.toFixed(2)}`);
+  lines.push(`Other income,${incomeOther.toFixed(2)}`);
+  lines.push(`Total income,${totalIncome.toFixed(2)}`);
+  lines.push(`Claimable expenses,${claimable.toFixed(2)}`);
+  lines.push(`Equipment (capital),${equipment.toFixed(2)}`);
+  lines.push(`Not claimable / other expense buckets,${notClaimable.toFixed(2)}`);
+  lines.push(`Total expenses (all buckets),${totalExpenses.toFixed(2)}`);
+  lines.push(`Owner drawings (not an expense),${drawingsTotal.toFixed(2)}`);
+  lines.push("");
+
+  lines.push("SECTION,Income — PAID payments");
+  lines.push("Date,Amount,Job id,Milestone id,Notes");
+  for (const row of paidRows) {
+    lines.push(
+      [
+        csvCell(isoDate(row.paidAt)),
+        moneyNum(row.amount).toFixed(2),
+        csvCell(row.jobId),
+        csvCell(row.milestoneId),
+        csvCell(row.notes),
+      ].join(","),
+    );
+  }
+  lines.push("");
+
+  lines.push("SECTION,Income — Other income");
+  lines.push("Date,Amount,Counts toward profit,Category item id,Notes");
+  for (const row of otherRows) {
+    lines.push(
+      [
+        csvCell(isoDate(row.receivedAt)),
+        moneyNum(row.amount).toFixed(2),
+        row.countsTowardProfit ? "yes" : "no",
+        csvCell(row.categoryItemId),
+        csvCell(row.notes),
+      ].join(","),
+    );
+  }
+  lines.push("");
+
+  lines.push("SECTION,Expenses");
+  lines.push("Date,Amount,Tax bucket,Category item id,Job id,Notes,Receipt URL");
+  for (const row of expenseRows) {
+    lines.push(
+      [
+        csvCell(isoDate(row.spentAt)),
+        moneyNum(row.amount).toFixed(2),
+        csvCell(row.taxBucket),
+        csvCell(row.categoryItemId),
+        csvCell(row.jobId),
+        csvCell(row.notes),
+        csvCell(row.receiptUrl),
+      ].join(","),
+    );
+  }
+  lines.push("");
+
+  lines.push("SECTION,Equipment (capital) — subset of expenses");
+  lines.push("Date,Amount,Category item id,Job id,Notes");
+  for (const row of expenseRows.filter((r) => r.taxBucket === "EQUIPMENT")) {
+    lines.push(
+      [
+        csvCell(isoDate(row.spentAt)),
+        moneyNum(row.amount).toFixed(2),
+        csvCell(row.categoryItemId),
+        csvCell(row.jobId),
+        csvCell(row.notes),
+      ].join(","),
+    );
+  }
+  lines.push("");
+
+  lines.push("SECTION,Owner drawings");
+  lines.push("Date,Amount,Notes");
+  for (const row of drawingRows) {
+    lines.push(
+      [
+        csvCell(isoDate(row.drawnAt)),
+        moneyNum(row.amount).toFixed(2),
+        csvCell(row.notes),
+      ].join(","),
+    );
+  }
+  lines.push("");
+
+  const csv = `${lines.join("\n")}\n`;
+  return {
+    csv,
+    filename: `workcraft-tax-books-${year}.csv`,
+  };
 }

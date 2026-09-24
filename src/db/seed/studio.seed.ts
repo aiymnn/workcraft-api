@@ -9,8 +9,9 @@ import { optionListKeys, optionLists } from "../schema/option_lists.js";
 import { hashPassword } from "../../auth/password.js";
 
 /**
- * Idempotent: default studio, sole OWNER (studio owner env), System Admin as
- * studio ADMIN (keeps SYSTEM_ADMIN platform role). Run after rbac + system-admin.
+ * Idempotent: default studio, sole OWNER (Adam), studio ADMIN coworker (Farhana).
+ * System Admin stays platform-only — not on studio_members.
+ * Run after rbac + system-admin.
  */
 async function seedStudio() {
   console.log("Seeding default studio...");
@@ -31,13 +32,36 @@ async function seedStudio() {
     .toLowerCase();
   const ownerPassword = process.env.STUDIO_OWNER_PASSWORD || "password";
 
+  const coadminName =
+    process.env.STUDIO_COADMIN_NAME?.trim() || "Farhana Aziera";
+  const coadminEmail = (
+    process.env.STUDIO_COADMIN_EMAIL || "farhana@workcraft.local"
+  )
+    .trim()
+    .toLowerCase();
+  const coadminPassword =
+    process.env.STUDIO_COADMIN_PASSWORD || ownerPassword;
+
   if (ownerPassword.length < 8) {
     throw new Error("STUDIO_OWNER_PASSWORD must be at least 8 characters.");
+  }
+  if (coadminPassword.length < 8) {
+    throw new Error("STUDIO_COADMIN_PASSWORD must be at least 8 characters.");
   }
 
   if (ownerEmail === systemAdminEmail) {
     throw new Error(
       "STUDIO_OWNER_EMAIL must differ from SYSTEM_ADMIN_EMAIL (sole Owner vs platform admin).",
+    );
+  }
+  if (coadminEmail === systemAdminEmail) {
+    throw new Error(
+      "STUDIO_COADMIN_EMAIL must differ from SYSTEM_ADMIN_EMAIL.",
+    );
+  }
+  if (coadminEmail === ownerEmail) {
+    throw new Error(
+      "STUDIO_COADMIN_EMAIL must differ from STUDIO_OWNER_EMAIL.",
     );
   }
 
@@ -178,53 +202,124 @@ async function seedStudio() {
     console.log(`OWNER membership already exists for ${ownerEmail}.`);
   }
 
-  // --- System Admin: studio ADMIN only (keep SYSTEM_ADMIN platform role) ---
+  // --- System Admin: platform only — remove any leftover studio membership ---
   const adminUsers = await db
     .select()
     .from(users)
     .where(eq(users.email, systemAdminEmail))
     .limit(1);
-  const admin = adminUsers[0];
-  if (!admin) {
+  const systemAdmin = adminUsers[0];
+  if (!systemAdmin) {
     throw new Error(
       `User ${systemAdminEmail} not found. Run system-admin seed before studio seed.`,
     );
   }
 
-  const adminMembership = await db
+  const systemAdminMembership = await db
     .select()
     .from(studioMembers)
     .where(
       and(
         eq(studioMembers.studioId, studio.id),
-        eq(studioMembers.userId, admin.id),
+        eq(studioMembers.userId, systemAdmin.id),
       ),
     )
     .limit(1);
 
-  if (!adminMembership[0]) {
+  if (systemAdminMembership[0]) {
+    await db
+      .delete(studioMembers)
+      .where(eq(studioMembers.id, systemAdminMembership[0].id));
+    console.log(
+      `Removed ${systemAdminEmail} from studio team (platform SYSTEM_ADMIN only).`,
+    );
+  } else {
+    console.log(
+      `${systemAdminEmail} is not on studio team (platform SYSTEM_ADMIN only).`,
+    );
+  }
+
+  // --- Studio ADMIN coworker (Farhana) ---
+  const existingCoadmins = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, coadminEmail))
+    .limit(1);
+  let coadmin = existingCoadmins[0];
+
+  if (!coadmin) {
+    const passwordHash = await hashPassword(coadminPassword);
+    const result = await db.insert(users).values({
+      name: coadminName,
+      email: coadminEmail,
+      passwordHash,
+      status: "ACTIVE",
+    });
+    const insertId = result[0].insertId;
+    const created = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, insertId))
+      .limit(1);
+    coadmin = created[0];
+    if (!coadmin) throw new Error("Failed to create studio co-admin user.");
+    console.log(`Created studio co-admin: ${coadminEmail}`);
+  } else {
+    console.log(
+      `Studio co-admin already exists: ${coadminEmail} (password not overwritten)`,
+    );
+  }
+
+  const coadminRoleRows = await db
+    .select()
+    .from(userRoles)
+    .where(
+      and(
+        eq(userRoles.userId, coadmin.id),
+        eq(userRoles.roleId, adminRole.id),
+      ),
+    )
+    .limit(1);
+  if (!coadminRoleRows[0]) {
+    await db.insert(userRoles).values({
+      userId: coadmin.id,
+      roleId: adminRole.id,
+    });
+    console.log("Assigned ADMIN platform role to studio co-admin.");
+  } else {
+    console.log("Studio co-admin already has ADMIN platform role.");
+  }
+
+  const coadminMembership = await db
+    .select()
+    .from(studioMembers)
+    .where(
+      and(
+        eq(studioMembers.studioId, studio.id),
+        eq(studioMembers.userId, coadmin.id),
+      ),
+    )
+    .limit(1);
+
+  if (!coadminMembership[0]) {
     await db.insert(studioMembers).values({
       studioId: studio.id,
-      userId: admin.id,
+      userId: coadmin.id,
       access: "ADMIN",
     });
-    console.log(`Linked ${systemAdminEmail} as studio ADMIN.`);
-  } else if (adminMembership[0].access === "OWNER") {
-    await db
-      .update(studioMembers)
-      .set({ access: "ADMIN" })
-      .where(eq(studioMembers.id, adminMembership[0].id));
-    console.log(
-      `Demoted ${systemAdminEmail} from OWNER to studio ADMIN (platform SYSTEM_ADMIN unchanged).`,
+    console.log(`Linked ${coadminEmail} as studio ADMIN.`);
+  } else if (coadminMembership[0].access === "OWNER") {
+    throw new Error(
+      `${coadminEmail} is OWNER — cannot seed as studio ADMIN coworker.`,
     );
-  } else if (adminMembership[0].access !== "ADMIN") {
+  } else if (coadminMembership[0].access !== "ADMIN") {
     await db
       .update(studioMembers)
       .set({ access: "ADMIN" })
-      .where(eq(studioMembers.id, adminMembership[0].id));
-    console.log(`Updated ${systemAdminEmail} membership to studio ADMIN.`);
+      .where(eq(studioMembers.id, coadminMembership[0].id));
+    console.log(`Updated ${coadminEmail} membership to studio ADMIN.`);
   } else {
-    console.log(`Studio ADMIN membership already exists for ${systemAdminEmail}.`);
+    console.log(`Studio ADMIN membership already exists for ${coadminEmail}.`);
   }
 
   console.log("Studio seed completed.");

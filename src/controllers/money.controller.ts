@@ -2,6 +2,7 @@ import type { Response } from "express";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import {
   MoneyServiceError,
+  buildTaxExportCsv,
   createDrawing,
   createExpense,
   createInvoice,
@@ -474,5 +475,28 @@ export async function deleteOtherIncomeController(req: AuthenticatedRequest, res
     return res.status(200).json({ status: "success", data: result });
   } catch (error) {
     return handleError(error, res, "Unable to delete other income.");
+  }
+}
+
+export async function getTaxExportController(req: AuthenticatedRequest, res: Response) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+    const yearRaw = typeof req.query.year === "string" ? Number(req.query.year) : NaN;
+    if (!Number.isInteger(yearRaw)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Query year=YYYY is required.",
+      });
+    }
+    const file = await buildTaxExportCsv(studioId, yearRaw);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${file.filename}"`,
+    );
+    return res.status(200).send(file.csv);
+  } catch (error) {
+    return handleError(error, res, "Unable to build the tax export.");
   }
 }

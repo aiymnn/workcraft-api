@@ -3,6 +3,8 @@ import { db } from "../db/database.js";
 import { users } from "../db/schema/users.js";
 import { studioMembers } from "../db/schema/studio_members.js";
 import { studios } from "../db/schema/studios.js";
+import { roles } from "../db/schema/roles.js";
+import { userRoles } from "../db/schema/user_roles.js";
 import { verifyPassword } from "./password.js";
 import {
   accessTokenLifetimeSeconds,
@@ -13,6 +15,31 @@ import {
 } from "./jwt.js";
 import { createUserSession } from "./session.service.js";
 import { verifyTotpCode } from "../lib/totp.js";
+
+const NO_STUDIO_MEMBERSHIP = "No studio membership for this account.";
+const PLATFORM_ADMIN_NO_STUDIO =
+  "Platform admin console is not available yet. Sign in with a studio Owner or Admin (Adam or Farhana).";
+
+async function userHasSystemAdminRole(userId: number): Promise<boolean> {
+  const rows = await db
+    .select({ id: roles.id })
+    .from(userRoles)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(
+      and(eq(userRoles.userId, userId), eq(roles.name, "SYSTEM_ADMIN")),
+    )
+    .limit(1);
+  return Boolean(rows[0]);
+}
+
+async function membershipOrThrow(userId: number) {
+  const membership = await getPrimaryStudioMembership(userId);
+  if (membership) return membership;
+  if (await userHasSystemAdminRole(userId)) {
+    throw new Error(PLATFORM_ADMIN_NO_STUDIO);
+  }
+  throw new Error(NO_STUDIO_MEMBERSHIP);
+}
 
 export interface LoginContext {
   userAgent?: string | null;
@@ -101,11 +128,7 @@ export async function authenticateUser(
     throw new Error("Invalid email or password.");
   }
 
-  const membership = await getPrimaryStudioMembership(user.id);
-
-  if (!membership) {
-    throw new Error("No studio membership for this account.");
-  }
+  const membership = await membershipOrThrow(user.id);
 
   if (user.totpEnabledAt && user.totpSecret) {
     return { requires2fa: true, tempToken: signTwoFactorToken(user.id) };
@@ -146,10 +169,7 @@ export async function completeTwoFactorLogin(
     throw new Error("That code is not valid. Try the next one.");
   }
 
-  const membership = await getPrimaryStudioMembership(user.id);
-  if (!membership) {
-    throw new Error("No studio membership for this account.");
-  }
+  const membership = await membershipOrThrow(user.id);
 
   return completeLogin(user, membership, context);
 }

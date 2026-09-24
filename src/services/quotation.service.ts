@@ -383,6 +383,7 @@ export async function listQuotations(params: {
   status?: (typeof quotations.$inferSelect)["status"];
   search?: string;
   jobId?: number;
+  clientId?: number;
 }) {
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
@@ -390,6 +391,10 @@ export async function listQuotations(params: {
 
   if (params.status) {
     conditions.push(eq(quotations.status, params.status));
+  }
+
+  if (params.clientId !== undefined) {
+    conditions.push(eq(quotations.clientId, params.clientId));
   }
 
   if (params.search) {

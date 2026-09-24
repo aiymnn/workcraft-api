@@ -191,10 +191,44 @@ async function seedStudioTemplates() {
           .where(eq(optionLists.id, ceremonyList.id));
       }
       console.log(`Seeded ${labels.length} CEREMONY_TYPE labels.`);
-    } else {
-      console.log(
-        `CEREMONY_TYPE already has ${itemCount} item(s); skipped.`,
+    } else if (itemCount > 0) {
+      // Fill any missing defaults without creating duplicates (idempotent).
+      const existing = await db
+        .select({ label: optionItems.label })
+        .from(optionItems)
+        .where(
+          and(
+            eq(optionItems.listId, ceremonyList.id),
+            isNull(optionItems.retiredAt),
+          ),
+        );
+      const existingLabels = new Set(
+        existing.map((row) => row.label.trim().toLowerCase()),
       );
+      const missing = labels.filter(
+        (label) => !existingLabels.has(label.trim().toLowerCase()),
+      );
+      if (missing.length > 0) {
+        const maxSort = itemCount;
+        await db.insert(optionItems).values(
+          missing.map((label, index) => ({
+            listId: ceremonyList!.id,
+            label,
+            sortOrder: maxSort + index,
+          })),
+        );
+        console.log(`Added ${missing.length} missing CEREMONY_TYPE labels.`);
+      } else {
+        console.log(
+          `CEREMONY_TYPE already has ${itemCount} item(s); skipped.`,
+        );
+      }
+      if (!ceremonyList.seeded) {
+        await db
+          .update(optionLists)
+          .set({ seeded: true })
+          .where(eq(optionLists.id, ceremonyList.id));
+      }
     }
   }
 
