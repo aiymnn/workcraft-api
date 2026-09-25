@@ -160,7 +160,7 @@ export async function getCrewController(
     if (!contact) {
       return res.status(404).json({ status: "error", message: "Crew contact not found." });
     }
-    return res.status(200).json({ status: "success", data: { contact } });
+    return res.status(200).json({ status: "success", data: { crew: contact } });
   } catch (error) {
     return handleTeamError(error, res, "Unable to get crew contact.");
   }
@@ -174,7 +174,7 @@ export async function createCrewController(
     const studioId = requireStudioId(req, res);
     if (studioId === null) return;
     const contact = await createCrewContact(studioId, req.body);
-    return res.status(201).json({ status: "success", data: { contact } });
+    return res.status(201).json({ status: "success", data: { crew: contact } });
   } catch (error) {
     return handleTeamError(error, res, "Unable to create crew contact.");
   }
@@ -192,7 +192,7 @@ export async function updateCrewController(
       return res.status(400).json({ status: "error", message: "Invalid crew id." });
     }
     const contact = await updateCrewContact(studioId, id, req.body);
-    return res.status(200).json({ status: "success", data: { contact } });
+    return res.status(200).json({ status: "success", data: { crew: contact } });
   } catch (error) {
     return handleTeamError(error, res, "Unable to update crew contact.");
   }
@@ -210,7 +210,7 @@ export async function deleteCrewController(
       return res.status(400).json({ status: "error", message: "Invalid crew id." });
     }
     const contact = await softDeleteCrewContact(studioId, id);
-    return res.status(200).json({ status: "success", data: { contact } });
+    return res.status(200).json({ status: "success", data: { crew: contact } });
   } catch (error) {
     return handleTeamError(error, res, "Unable to retire crew contact.");
   }

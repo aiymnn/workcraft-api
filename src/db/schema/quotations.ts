@@ -44,6 +44,8 @@ export const quotations = mysqlTable("quotations", {
 
   notes: text("notes"),
 
+  leadSourceItemId: int("lead_source_item_id"),
+
   totalAmount: decimal("total_amount", { precision: 12, scale: 2 })
     .notNull()
     .default("0"),

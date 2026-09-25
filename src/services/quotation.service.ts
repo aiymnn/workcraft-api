@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   like,
   or,
   sql,
@@ -532,6 +533,7 @@ export async function createQuotation(
     currency?: string;
     intro?: string | null;
     notes?: string | null;
+    leadSourceItemId?: number | null;
     lineItems?: LineInput[];
     sessions?: SessionInput[];
     paymentRows?: PaymentInput[];
@@ -564,6 +566,7 @@ export async function createQuotation(
         input.notes !== undefined
           ? emptyToNull(input.notes)
           : allocated.quoteNotes,
+      leadSourceItemId: input.leadSourceItemId ?? null,
       totalAmount,
     });
 
@@ -602,6 +605,7 @@ export async function updateQuotation(
     currency?: string;
     intro?: string | null;
     notes?: string | null;
+    leadSourceItemId?: number | null;
     lineItems?: LineInput[];
     sessions?: SessionInput[];
     paymentRows?: PaymentInput[];
@@ -633,6 +637,9 @@ export async function updateQuotation(
   if (input.currency !== undefined) headerUpdates.currency = input.currency;
   if (input.intro !== undefined) headerUpdates.intro = emptyToNull(input.intro);
   if (input.notes !== undefined) headerUpdates.notes = emptyToNull(input.notes);
+  if (input.leadSourceItemId !== undefined) {
+    headerUpdates.leadSourceItemId = input.leadSourceItemId;
+  }
 
   if (input.lineItems !== undefined) {
     headerUpdates.totalAmount = computeTotal(input.lineItems);
@@ -862,6 +869,18 @@ export async function convertQuotationToJob(
 
   const existingJobId = await findJobIdForQuotation(studioId, id);
   if (existingJobId !== null) {
+    if (quote.leadSourceItemId != null) {
+      await db
+        .update(jobs)
+        .set({ leadSourceItemId: quote.leadSourceItemId })
+        .where(
+          and(
+            eq(jobs.id, existingJobId),
+            eq(jobs.studioId, studioId),
+            isNull(jobs.leadSourceItemId),
+          ),
+        );
+    }
     return loadConvertResult(studioId, existingJobId, id, false);
   }
 
@@ -878,6 +897,7 @@ export async function convertQuotationToJob(
         clientId: quote.clientId,
         quotationId: quote.id,
         status: "CONFIRMED",
+        leadSourceItemId: quote.leadSourceItemId,
       });
       const newJobId = result[0].insertId;
 
