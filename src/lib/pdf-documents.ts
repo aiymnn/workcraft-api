@@ -466,3 +466,81 @@ export function buildInvoicePdf(input: InvoicePdfInput): Promise<Buffer> {
     drawFooter(doc);
   });
 }
+
+export type CrewSchedulePdfInput = {
+  studioName: string;
+  whoLabel: string;
+  windowLabel: string;
+  rows: {
+    date: string;
+    start: string;
+    end: string;
+    type: string;
+    clientName: string;
+    venue: string;
+    role: string;
+    personName?: string | null;
+  }[];
+};
+
+export function buildCrewSchedulePdf(
+  input: CrewSchedulePdfInput,
+): Promise<Buffer> {
+  return renderToBuffer((doc) => {
+    drawBrandHeader(doc, "CREW SCHEDULE", [
+      { label: "Who", value: input.whoLabel },
+      { label: "Window", value: input.windowLabel },
+      { label: "Printed", value: formatDate(new Date()) },
+    ]);
+    doc
+      .font("Helvetica")
+      .fontSize(10)
+      .fillColor(INK)
+      .text(input.studioName, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
+    doc
+      .fontSize(9)
+      .fillColor(MUTED)
+      .text(
+        "Assignments on the books for this window. Cancelled jobs are not included.",
+        PAGE_MARGIN,
+        doc.y + 2,
+        { width: CONTENT_WIDTH },
+      );
+    doc.fillColor(INK);
+    doc.moveDown(0.8);
+
+    if (input.rows.length === 0) {
+      doc.fontSize(11).font("Helvetica").text("No assignments in this window.");
+      drawFooter(doc);
+      return;
+    }
+
+    const showWho = input.whoLabel === "Everyone";
+    for (const row of input.rows) {
+      ensureRoom(doc, 48);
+      const top = doc.y;
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(INK)
+        .text(`${row.date}  ·  ${row.start}–${row.end}`, PAGE_MARGIN, top, {
+          width: CONTENT_WIDTH,
+        });
+      const who = showWho && row.personName ? `${row.personName} · ` : "";
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .text(`${row.type} · ${row.clientName}`, { width: CONTENT_WIDTH });
+      doc
+        .fontSize(9)
+        .fillColor(MUTED)
+        .text(`${who}${row.role} · ${row.venue}`, { width: CONTENT_WIDTH });
+      doc.fillColor(INK);
+      doc.moveDown(0.35);
+      drawRule(doc);
+      doc.moveDown(0.45);
+    }
+
+    drawFooter(doc);
+  });
+}

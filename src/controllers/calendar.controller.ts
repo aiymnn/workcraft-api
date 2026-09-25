@@ -1,5 +1,10 @@
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
+import { db } from "../db/database.js";
+import { studios } from "../db/schema/studios.js";
+import { eq } from "drizzle-orm";
+import { buildCrewSchedulePdf } from "../lib/pdf-documents.js";
+import { crewSchedulePdfSchema } from "../schemas/calendar.schema.js";
 import {
   JobServiceError,
   listCalendarSessions,
@@ -55,6 +60,63 @@ export async function listCalendarSessionsController(
     return res.status(500).json({
       status: "error",
       message: "Unable to list calendar sessions.",
+    });
+  }
+}
+
+export async function crewSchedulePdfController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const studioId = requireStudioId(req, res);
+    if (studioId === null) return;
+
+    const parsed = crewSchedulePdfSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        status: "error",
+        message: "Crew schedule details are incomplete.",
+      });
+    }
+
+    const rows = await db
+      .select({ name: studios.name })
+      .from(studios)
+      .where(eq(studios.id, studioId))
+      .limit(1);
+    const studioName = rows[0]?.name ?? "Workcraft Studio";
+    const buffer = await buildCrewSchedulePdf({
+      studioName,
+      whoLabel: parsed.data.whoLabel,
+      windowLabel: parsed.data.windowLabel,
+      rows: parsed.data.rows.map((row) => ({
+        date: row.date,
+        start: row.start,
+        end: row.end,
+        type: row.type,
+        clientName: row.clientName,
+        venue: row.venue,
+        role: row.role,
+        personName: row.personName ?? null,
+      })),
+    });
+    const slug = parsed.data.whoLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="crew-schedule-${slug || "schedule"}.pdf"`,
+    );
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Unable to build crew schedule PDF.", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Unable to build the crew schedule PDF.",
     });
   }
 }
